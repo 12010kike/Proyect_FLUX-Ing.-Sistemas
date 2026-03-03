@@ -38,6 +38,7 @@ function mapearGrupo(grupo, miembros, actividad) {
     id: grupo.id,
     nombre: grupo.nombre,
     codigo: grupo.codigo,
+    color_id: grupo.color_id || "",
     creadorId: grupo.creador_id,
     esPublico: Boolean(grupo.es_publico),
     miembros: (miembros || []).map(m => ({
@@ -65,7 +66,7 @@ export async function listarGruposDelUsuario() {
 
   const { data, error } = await supabase
     .from("grupo_miembros")
-    .select("grupo_id, is_admin, grupos ( id, nombre, codigo, creador_id, created_at )")
+    .select("grupo_id, is_admin, grupos ( id, nombre, codigo, color_id, creador_id, created_at )")
     .eq("user_id", user.id)
     .order("joined_at", { ascending: false });
   if (error) throw error;
@@ -79,7 +80,7 @@ export async function listarGruposDelUsuario() {
     .filter(Boolean);
 }
 
-export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false }) {
+export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false, colorId = "" }) {
   const {
     data: { session },
     error: sessionError
@@ -97,6 +98,7 @@ export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false
     .insert({
       nombre,
       codigo,
+      color_id: colorId || null,
       creador_id: user.id,
       es_publico: esPublico
     })
@@ -259,6 +261,52 @@ export async function actualizarNombreGrupo({
   }
 }
 
+export async function actualizarColorGrupo({
+  grupoId,
+  colorId,
+  actorId = null,
+  actorNombre = ""
+}) {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  const { data: grupo, error: grupoError } = await supabase
+    .from("grupos")
+    .select("id, creador_id")
+    .eq("id", grupoId)
+    .maybeSingle();
+  if (grupoError) throw grupoError;
+  if (!grupo) throw new Error("Grupo no encontrado.");
+  if (grupo.creador_id !== user.id) {
+    throw new Error("Solo el creador puede cambiar el color del grupo.");
+  }
+
+  const { error } = await supabase
+    .from("grupos")
+    .update({ color_id: colorId || null })
+    .eq("id", grupoId);
+  if (error) throw error;
+
+  if (actorId) {
+    const mensaje = `COLOR::${actorNombre || "Usuario"} cambió el color del grupo.`;
+    const { error: actividadError } = await supabase
+      .from("grupo_actividad")
+      .insert({
+        grupo_id: grupoId,
+        actor_id: actorId,
+        mensaje
+      });
+    if (actividadError) {
+      console.warn("No se pudo registrar actividad de color:", actividadError.message);
+    }
+  }
+}
+
 async function obtenerUsuarioActual() {
   const {
     data: { session },
@@ -287,7 +335,7 @@ export async function obtenerRepositorioParaLecturaPorCodigo(codigo) {
   const codigoNormalizado = codigo.trim().toUpperCase();
   const { data: grupo, error: errorGrupo } = await supabase
     .from("grupos")
-    .select("id, nombre, codigo, creador_id, es_publico")
+    .select("id, nombre, codigo, color_id, creador_id, es_publico")
     .eq("codigo", codigoNormalizado)
     .maybeSingle();
   if (errorGrupo) throw errorGrupo;
@@ -445,14 +493,14 @@ export async function buscarRepositoriosPublicos(
 
   let queryGrupos = supabase
     .from("grupos")
-    .select("id, nombre, codigo, creador_id, es_publico, created_at")
+    .select("id, nombre, codigo, color_id, creador_id, es_publico, created_at")
     .eq("es_publico", true)
     .limit(250);
   if (desde) queryGrupos = queryGrupos.gte("created_at", desde.toISOString());
 
   let queryReposPublicos = supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .limit(250);
   if (desde) queryReposPublicos = queryReposPublicos.gte("created_at", desde.toISOString());
 
@@ -527,6 +575,7 @@ export async function buscarRepositoriosPublicos(
       id: g.id,
       nombre: g.nombre,
       codigo: g.codigo,
+      color_id: g.color_id || "",
       adminNombre: adminPorGrupo.get(g.id) || "Admin",
       archivosCount: countArchivosPorGrupo.get(g.id) || 0,
       createdAt: g.created_at || null
@@ -554,6 +603,7 @@ export async function buscarRepositoriosPublicos(
       titulo: r.titulo,
       creadorId: r.creador_id,
       creadorNombre: r.creador_nombre || "Usuario",
+      color_id: r.color_id || "",
       createdAt: r.created_at || null
     }))
     .filter(r => {
@@ -591,7 +641,7 @@ function obtenerPromedioRating({ ratings, repositorioId }) {
   return { ratingPromedio: suma / total, ratingTotal: total };
 }
 
-export async function crearRepositorioPublico({ titulo, creadorNombre = "" }) {
+export async function crearRepositorioPublico({ titulo, creadorNombre = "", colorId = "" }) {
   const {
     data: { session },
     error: sessionError
@@ -609,9 +659,10 @@ export async function crearRepositorioPublico({ titulo, creadorNombre = "" }) {
     .insert({
       titulo: tituloLimpio,
       creador_id: user.id,
-      creador_nombre: nombre
+      creador_nombre: nombre,
+      color_id: colorId || null
     })
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .single();
   if (error) throw error;
   return data;
@@ -622,7 +673,7 @@ export async function obtenerRepositorioPublicoPorId(id) {
   if (!repoId) return null;
   const { data, error } = await supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .eq("id", repoId)
     .maybeSingle();
   if (error) throw error;
@@ -706,6 +757,30 @@ async function asegurarPropietarioRepositorioPublico({ repositorioId, userId }) 
   return repo;
 }
 
+export async function actualizarColorRepositorioPublico({ repositorioId, colorId }) {
+  const repoId = `${repositorioId || ""}`.trim();
+  if (!repoId) throw new Error("Repositorio inválido.");
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
+
+  const { data, error } = await supabase
+    .from("repositorios_publicos")
+    .update({ color_id: colorId || null })
+    .eq("id", repoId)
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 async function esColaboradorRepositorioPublico({ repositorioId, userId }) {
   if (!repositorioId || !userId) return false;
   const { data, error } = await supabase
@@ -744,6 +819,18 @@ export async function listarArchivosRepositorioPublico({ repositorioId }) {
 
 export async function subirArchivoRepositorioPublico({ repositorioId, archivo }) {
   if (!archivo) throw new Error("Selecciona un archivo.");
+  const tiposPermitidos = [
+    "application/pdf",
+    "image/png",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ];
+  const sizeMaximo = 20 * 1024 * 1024;
+  if (!tiposPermitidos.includes(archivo.type || "")) {
+    throw new Error("Tipo de archivo no permitido. Solo PDF, DOCX o PNG.");
+  }
+  if ((archivo.size || 0) > sizeMaximo) {
+    throw new Error("El archivo supera el límite de 20MB.");
+  }
 
   const {
     data: { session },
@@ -968,7 +1055,7 @@ export async function listarRepositoriosFavoritos() {
 
   const { data, error } = await supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .in("id", ids)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -1039,7 +1126,7 @@ export async function listarRepositoriosCreados() {
 
   const { data, error } = await supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .eq("creador_id", userId)
     .order("created_at", { ascending: false });
   if (error) throw error;

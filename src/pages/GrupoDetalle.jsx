@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   actualizarVisibilidadGrupo,
   actualizarNombreGrupo,
+  actualizarColorGrupo,
   abandonarGrupo,
   eliminarArchivoGrupo,
   eliminarGrupo,
@@ -14,7 +15,7 @@ import {
   marcarMensajesLeidos
 } from "../servicios/grupos.api";
 import { supabase } from "../config/supabaseClient";
-import { obtenerColorGrupo } from "../utils/groupColors";
+import { PALETA_BANNERS, obtenerColorEntidad } from "../utils/groupColors";
 import "../estilos/flux.css";
 import TaskMaster from "./TaskMaster";
 import {
@@ -42,6 +43,8 @@ export default function GrupoDetalle() {
   const [nuevoNombreGrupo, setNuevoNombreGrupo] = useState("");
   const [nuevoAnuncio, setNuevoAnuncio] = useState("");
   const [guardandoVisibilidad, setGuardandoVisibilidad] = useState(false);
+  const [guardandoColorGrupo, setGuardandoColorGrupo] = useState(false);
+  const [colorGrupoSeleccionado, setColorGrupoSeleccionado] = useState(PALETA_BANNERS[0].id);
   const [error, setError] = useState("");
 
   const [archivosSeleccionados, setArchivosSeleccionados] = useState([]);
@@ -183,6 +186,7 @@ export default function GrupoDetalle() {
           msg.startsWith("ARCHIVO::") ||
           msg.startsWith("RENOMBRE::") ||
           msg.startsWith("VISIBILIDAD::") ||
+          msg.startsWith("COLOR::") ||
           msg.includes("se ha unido") ||
           msg.includes("creo el grupo") ||
           msg.includes("creó el grupo")
@@ -225,6 +229,15 @@ export default function GrupoDetalle() {
             autor: autorPorId || "Sistema",
             fecha: a.fecha,
             texto: msg.replace("VISIBILIDAD::", "")
+          };
+        }
+
+        if (msg.startsWith("COLOR::")) {
+          return {
+            tipo: "color",
+            autor: autorPorId || "Sistema",
+            fecha: a.fecha,
+            texto: msg.replace("COLOR::", "")
           };
         }
 
@@ -405,6 +418,7 @@ export default function GrupoDetalle() {
     }
     setGrupo(g);
     setNuevoNombreGrupo(g?.nombre || "");
+    setColorGrupoSeleccionado(g?.color_id || PALETA_BANNERS[0].id);
     const miembro = g?.miembros?.find(m => m.user_id === userId);
     setEsAdmin(Boolean(miembro?.is_admin));
     return g || null;
@@ -683,6 +697,26 @@ export default function GrupoDetalle() {
     }
   }
 
+  async function manejarGuardarColorGrupo() {
+    if (!grupo?.id) return;
+    if (!puedePublicarAnuncio) return;
+    setError("");
+    setGuardandoColorGrupo(true);
+    try {
+      await actualizarColorGrupo({
+        grupoId: grupo.id,
+        colorId: colorGrupoSeleccionado,
+        actorId: userId,
+        actorNombre: displayName
+      });
+      await recargarGrupo();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setGuardandoColorGrupo(false);
+    }
+  }
+
   async function manejarExpulsar(miembroId) {
     if (!grupo) return;
     await expulsarMiembro({ grupoId: grupo.id, miembroId });
@@ -862,7 +896,12 @@ export default function GrupoDetalle() {
     );
   }
 
-  const colorGrupo = obtenerColorGrupo(grupo.codigo || grupo.nombre || "");
+  const colorGrupo = obtenerColorEntidad({
+    tipo: "grupo",
+    entidadId: grupo.id,
+    identificador: grupo.codigo || grupo.nombre || grupo.id || "",
+    colorId: grupo.color_id || ""
+  });
   
   return (
     <div className="container">
@@ -945,6 +984,34 @@ export default function GrupoDetalle() {
 
           {puedePublicarAnuncio && (
             <div className="card">
+              <strong>Color del grupo</strong>
+              <div className="label" style={{ marginTop: 6 }}>
+                Selecciona uno de los 10 colores predefinidos.
+              </div>
+              <div className="color-picker-row" style={{ marginTop: 8 }}>
+                {PALETA_BANNERS.map(color => (
+                  <button
+                    key={color.id}
+                    type="button"
+                    className={`color-swatch ${colorGrupoSeleccionado === color.id ? "selected" : ""}`}
+                    style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                    onClick={() => setColorGrupoSeleccionado(color.id)}
+                    aria-label={`Color ${color.id}`}
+                  />
+                ))}
+              </div>
+              <button
+                className="btn btnPrimary"
+                onClick={manejarGuardarColorGrupo}
+                disabled={guardandoColorGrupo}
+              >
+                {guardandoColorGrupo ? "Guardando..." : "Guardar color"}
+              </button>
+            </div>
+          )}
+
+          {puedePublicarAnuncio && (
+            <div className="card">
               <strong>Nuevo anuncio</strong>
               <textarea
                 className="input"
@@ -998,7 +1065,7 @@ export default function GrupoDetalle() {
           ) : (
             <div className="card repo-card" style={{ maxWidth: "none" }}>
               <strong className="repo-title">Subir archivos</strong>
-              <p className="label repo-subtitle">PDF, DOCX, PNG (Máx. 20MB)</p>
+              <p className="label repo-subtitle"></p>
 
               <div className="drop-area" onClick={() => inputRef.current?.click()} onDrop={manejarDrop} onDragOver={manejarDragOver}>
                 <div className="drop-content">

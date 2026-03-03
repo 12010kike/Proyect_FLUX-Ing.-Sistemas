@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { listarArchivosGrupoPorId, obtenerRepositorioParaLecturaPorCodigo } from "../servicios/grupos.api";
 import { supabase } from "../config/supabaseClient";
-import { obtenerColorGrupo } from "../utils/groupColors";
+import { obtenerColorEntidad } from "../utils/groupColors";
 import "../estilos/flux.css";
 import Estrellas from "../components/Estrellas";
 
@@ -66,7 +66,12 @@ export default function DetallesRepositorio() {
     );
   }
 
-  const colorGrupo = obtenerColorGrupo(grupo.codigo || grupo.nombre || "");
+  const colorGrupo = obtenerColorEntidad({
+    tipo: "grupo",
+    entidadId: grupo.id,
+    identificador: grupo.codigo || grupo.nombre || grupo.id || "",
+    colorId: grupo.color_id || ""
+  });
 
   return (
     <div className="container">

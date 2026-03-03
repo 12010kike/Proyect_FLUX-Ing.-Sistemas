@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   eliminarRepositorioPublico,
   eliminarArchivoRepositorioPublico,
+  actualizarColorRepositorioPublico,
   guardarCalificacionRepositorioPublico,
   agregarColaboradorPorEmail,
   eliminarColaboradorRepositorioPublico,
@@ -19,6 +20,12 @@ import {
 import { supabase } from "../config/supabaseClient";
 import Estrellas from "../components/Estrellas";
 import ModalQR from "../components/ModalQR"; // Importación del QR
+import {
+  PALETA_BANNERS,
+  guardarColorGuardado,
+  obtenerColorEntidad,
+  obtenerColorGuardado
+} from "../utils/groupColors";
 import "../estilos/flux.css";
 
 export default function RepositorioPublicoDetalle() {
@@ -44,6 +51,7 @@ export default function RepositorioPublicoDetalle() {
   const [ratingTotal, setRatingTotal] = useState(0);
   const [miRating, setMiRating] = useState("");
   const [guardandoRating, setGuardandoRating] = useState(false);
+  const [colorRepoSeleccionado, setColorRepoSeleccionado] = useState(PALETA_BANNERS[0].id);
   
   // ESTADO NUEVO PARA EL QR
   const [mostrarQR, setMostrarQR] = useState(false);
@@ -110,6 +118,9 @@ export default function RepositorioPublicoDetalle() {
       try {
         const data = await obtenerRepositorioPublicoPorId(id);
         setRepo(data);
+        setColorRepoSeleccionado(
+          data?.color_id || obtenerColorGuardado("repo_publico", data?.id) || PALETA_BANNERS[0].id
+        );
         const {
           data: { session }
         } = await supabase.auth.getSession();
@@ -179,7 +190,18 @@ export default function RepositorioPublicoDetalle() {
   }
 
   const manejarArchivos = files => {
-    const archivosValidos = Array.from(files || []).filter(file => file.size <= 20 * 1024 * 1024);
+    const tiposPermitidos = [
+      "application/pdf",
+      "image/png",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ];
+    const archivos = Array.from(files || []);
+    const archivosValidos = archivos.filter(
+      file => tiposPermitidos.includes(file.type) && file.size <= 20 * 1024 * 1024
+    );
+    if (archivos.length && !archivosValidos.length) {
+      setMensaje("Solo se permiten archivos PDF, DOCX o PNG de hasta 20MB.");
+    }
     setArchivosSeleccionados(archivosValidos);
   };
 
@@ -314,6 +336,24 @@ export default function RepositorioPublicoDetalle() {
     }
   }
 
+  async function manejarGuardarColorRepositorio() {
+    if (!repo?.id || !esCreador) return;
+    try {
+      const actualizado = await actualizarColorRepositorioPublico({
+        repositorioId: repo.id,
+        colorId: colorRepoSeleccionado
+      });
+      guardarColorGuardado("repo_publico", repo.id, colorRepoSeleccionado);
+      setRepo(actualizado);
+      setColorRepoSeleccionado(actualizado?.color_id || PALETA_BANNERS[0].id);
+      setMensaje("Color del repositorio actualizado.");
+    } catch (e) {
+      guardarColorGuardado("repo_publico", repo.id, colorRepoSeleccionado);
+      setRepo(prev => (prev ? { ...prev, color_id: colorRepoSeleccionado } : prev));
+      setMensaje(`No se pudo guardar en Supabase (${e.message}). Se aplicó el color localmente en este navegador.`);
+    }
+  }
+
   if (cargando) {
     return (
       <div className="container">
@@ -336,11 +376,18 @@ export default function RepositorioPublicoDetalle() {
     );
   }
 
+  const colorRepo = obtenerColorEntidad({
+    tipo: "repo_publico",
+    entidadId: repo.id,
+    identificador: repo.id || repo.titulo || "",
+    colorId: repo.color_id || ""
+  });
+
   return (
     <div className="container">
       <div
         className="group-banner"
-        style={{ "--banner-a": "#6c757d", "--banner-b": "#343a40" }}
+        style={{ "--banner-a": colorRepo.a, "--banner-b": colorRepo.b }}
       >
         <div className="group-banner-content group-banner-single">
           <button
@@ -431,6 +478,27 @@ export default function RepositorioPublicoDetalle() {
                 </button>
               </div>
             )}
+
+            {esCreador && (
+              <div style={{ marginTop: 12 }}>
+                <label className="label">Color del repositorio</label>
+                <div className="color-picker-row">
+                  {PALETA_BANNERS.map(color => (
+                    <button
+                      key={color.id}
+                      type="button"
+                      className={`color-swatch ${colorRepoSeleccionado === color.id ? "selected" : ""}`}
+                      style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                      onClick={() => setColorRepoSeleccionado(color.id)}
+                      aria-label={`Color ${color.id}`}
+                    />
+                  ))}
+                </div>
+                <button className="btn btnPrimary" onClick={manejarGuardarColorRepositorio}>
+                  Guardar color
+                </button>
+              </div>
+            )}
           </div>
 
           <div style={{ marginTop: 12 }}>
@@ -488,6 +556,7 @@ export default function RepositorioPublicoDetalle() {
                       ? `${archivosSeleccionados.length} archivo(s) seleccionado(s)`
                       : "Arrastra archivos aquí o haz click para seleccionar"}
                   </p>
+                  <small className="label">PDF, DOCX, PNG hasta 20MB</small>
                 </div>
               </div>
 
