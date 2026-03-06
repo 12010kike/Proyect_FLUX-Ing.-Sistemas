@@ -23,6 +23,16 @@ const DIAS = [
   { value: 6, label: "Sab" }
 ];
 
+const DIAS_CAL = [
+  { value: 1, label: "Lun" },
+  { value: 2, label: "Mar" },
+  { value: 3, label: "Mie" },
+  { value: 4, label: "Jue" },
+  { value: 5, label: "Vie" },
+  { value: 6, label: "Sab" },
+  { value: 0, label: "Dom" }
+];
+
 export default function AsistenteIA() {
   const navigate = useNavigate();
   const [tabActiva, setTabActiva] = useState("planificador");
@@ -64,6 +74,8 @@ export default function AsistenteIA() {
   const [chatsGuardados, setChatsGuardados] = useState([]);
   const [chatActivoId, setChatActivoId] = useState(null);
   const chatEndRef = useRef(null);
+  const [renombrando, setRenombrando] = useState(null);
+  const [nuevoTitulo, setNuevoTitulo] = useState("");
 
   // ─────────────────────────────────────────────────────────
   // Cargar sesión inicial
@@ -248,6 +260,14 @@ export default function AsistenteIA() {
     return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function getTituloPersonalizado(id) {
+    try { return localStorage.getItem(`flux_chat_titulo_${id}`) || null; } catch { return null; }
+  }
+
+  function guardarTituloPersonalizado(id, titulo) {
+    try { localStorage.setItem(`flux_chat_titulo_${id}`, titulo); } catch {}
+  }
+
   function crearTituloChat(texto = "") {
     const limpio = `${texto}`.trim().replace(/\s+/g, " ");
     if (!limpio) return "Chat sin título";
@@ -265,7 +285,7 @@ export default function AsistenteIA() {
       if (!porChat.has(id)) {
         porChat.set(id, {
           id,
-          titulo: crearTituloChat(item.mensaje_usuario),
+          titulo: getTituloPersonalizado(id) || crearTituloChat(item.mensaje_usuario),
           updatedAt: item.created_at,
           mensajes: []
         });
@@ -288,7 +308,7 @@ export default function AsistenteIA() {
       const existente = prev.find(c => c.id === id);
       const conv = {
         id,
-        titulo: existente?.titulo || crearTituloChat(tituloBase),
+        titulo: existente?.titulo || getTituloPersonalizado(id) || crearTituloChat(tituloBase),
         updatedAt: updatedAt || new Date().toISOString(),
         mensajes
       };
@@ -311,6 +331,21 @@ export default function AsistenteIA() {
     setChatActivoId(id);
     setMensajesChat(chat.mensajes);
     setErrorChat("");
+    setRenombrando(null);
+  }
+
+  function confirmarRenombre(id) {
+    const titulo = nuevoTitulo.trim();
+    if (!titulo) { setRenombrando(null); return; }
+    guardarTituloPersonalizado(id, titulo);
+    setChatsGuardados(prev => prev.map(c => c.id === id ? { ...c, titulo } : c));
+    setRenombrando(null);
+    setNuevoTitulo("");
+  }
+
+  function manejarTeclasRenombre(e, id) {
+    if (e.key === "Enter") { e.preventDefault(); confirmarRenombre(id); }
+    if (e.key === "Escape") { setRenombrando(null); setNuevoTitulo(""); }
   }
 
   function formatearFechaChat(fecha) {
@@ -333,18 +368,6 @@ export default function AsistenteIA() {
     } finally {
       setGenerandoPlan(false);
     }
-  }
-
-  function manejarCambioRepo(e) {
-    const val = e.target.value;
-    if (!val) {
-      setRepoSeleccionado("");
-      setTipoRepoSeleccionado("grupo");
-      return;
-    }
-    const [tipo, id] = val.split("::");
-    setTipoRepoSeleccionado(tipo);
-    setRepoSeleccionado(id);
   }
 
   async function manejarGenerarResumen() {
@@ -429,8 +452,6 @@ export default function AsistenteIA() {
   // ─────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────
-  const repoSelectValue = repoSeleccionado ? `${tipoRepoSeleccionado}::${repoSeleccionado}` : "";
-
   if (cargandoSesion) {
     return (
       <div className="container">
@@ -554,26 +575,27 @@ export default function AsistenteIA() {
                 .
               </p>
             ) : (
-              <div className="ia-horario-grid" style={{ marginTop: 8 }}>
-                {horario
-                  .slice()
-                  .sort((a, b) =>
-                    a.dayOfWeek === b.dayOfWeek
-                      ? a.startTime.localeCompare(b.startTime)
-                      : a.dayOfWeek - b.dayOfWeek
-                  )
-                  .map(b => {
-                    const dia = DIAS.find(d => d.value === b.dayOfWeek)?.label || "?";
-                    return (
-                      <div key={b.id} className="ia-bloque">
-                        <span className="ia-bloque-dia">{dia}</span>
-                        <span className="ia-bloque-hora">
-                          {b.startTime}–{b.endTime}
-                        </span>
-                        {b.type && <span className="ia-bloque-tipo">{b.type}</span>}
-                      </div>
-                    );
-                  })}
+              <div className="ia-calendario-semana">
+                {DIAS_CAL.map(dia => {
+                  const bloquesDia = horario
+                    .filter(b => b.dayOfWeek === dia.value)
+                    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+                  return (
+                    <div key={dia.value} className={`ia-cal-columna ${bloquesDia.length ? "tiene-bloques" : ""}`}>
+                      <div className="ia-cal-dia-header">{dia.label}</div>
+                      {bloquesDia.length === 0 ? (
+                        <div className="ia-cal-vacio">—</div>
+                      ) : (
+                        bloquesDia.map(b => (
+                          <div key={b.id} className="ia-cal-bloque">
+                            <span className="ia-cal-hora">{b.startTime}–{b.endTime}</span>
+                            {b.type && <span className="ia-cal-tipo">{b.type}</span>}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -608,32 +630,49 @@ export default function AsistenteIA() {
         <div className="group-tab-content">
           <div className="card">
             <strong>Selecciona un repositorio</strong>
-            <select
-              className="input"
-              style={{ marginTop: 8 }}
-              value={repoSelectValue}
-              onChange={manejarCambioRepo}
-            >
-              <option value="">— Elige un repositorio —</option>
+            <div className="ia-repo-picker">
+              {reposGrupos.length === 0 && reposPublicos.length === 0 && (
+                <p className="label">No tienes grupos ni repositorios aún.</p>
+              )}
               {reposGrupos.length > 0 && (
-                <optgroup label="Mis grupos">
-                  {reposGrupos.map(g => (
-                    <option key={`grupo::${g.id}`} value={`grupo::${g.id}`}>
-                      {g.nombre}
-                    </option>
-                  ))}
-                </optgroup>
+                <div className="ia-repo-seccion">
+                  <div className="label ia-repo-seccion-label">Mis grupos</div>
+                  <div className="ia-repo-grid">
+                    {reposGrupos.map(g => (
+                      <button
+                        key={g.id}
+                        className={`ia-repo-card ${repoSeleccionado === g.id && tipoRepoSeleccionado === "grupo" ? "selected" : ""}`}
+                        onClick={() => { setTipoRepoSeleccionado("grupo"); setRepoSeleccionado(g.id); }}
+                      >
+                        <span className="ia-repo-icono">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+                        </span>
+                        <span className="ia-repo-nombre">{g.nombre}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
               {reposPublicos.length > 0 && (
-                <optgroup label="Mis repositorios públicos">
-                  {reposPublicos.map(r => (
-                    <option key={`publico::${r.id}`} value={`publico::${r.id}`}>
-                      {r.titulo}
-                    </option>
-                  ))}
-                </optgroup>
+                <div className="ia-repo-seccion">
+                  <div className="label ia-repo-seccion-label">Mis repositorios públicos</div>
+                  <div className="ia-repo-grid">
+                    {reposPublicos.map(r => (
+                      <button
+                        key={r.id}
+                        className={`ia-repo-card ${repoSeleccionado === r.id && tipoRepoSeleccionado === "publico" ? "selected" : ""}`}
+                        onClick={() => { setTipoRepoSeleccionado("publico"); setRepoSeleccionado(r.id); }}
+                      >
+                        <span className="ia-repo-icono">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+                        </span>
+                        <span className="ia-repo-nombre">{r.titulo}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
-            </select>
+            </div>
 
             {cargandoArchivos && (
               <p className="label" style={{ marginTop: 8 }}>Cargando archivos...</p>
@@ -733,14 +772,42 @@ export default function AsistenteIA() {
             ) : (
               <div className="ia-chat-sesiones-lista" style={{ marginTop: 8 }}>
                 {chatsGuardados.map(c => (
-                  <button
+                  <div
                     key={c.id}
-                    className={`ia-chat-sesion-btn ${chatActivoId === c.id ? "active" : ""}`}
-                    onClick={() => seleccionarChat(c.id)}
+                    className={`ia-chat-sesion-item ${chatActivoId === c.id ? "active" : ""}`}
                   >
-                    <span>{c.titulo}</span>
-                    <span className="label">{formatearFechaChat(c.updatedAt)}</span>
-                  </button>
+                    {renombrando === c.id ? (
+                      <div className="ia-chat-renombrar">
+                        <input
+                          className="input"
+                          value={nuevoTitulo}
+                          onChange={e => setNuevoTitulo(e.target.value)}
+                          onKeyDown={e => manejarTeclasRenombre(e, c.id)}
+                          autoFocus
+                          placeholder="Nombre del chat..."
+                        />
+                        <button className="btn ia-rename-ok" onClick={() => confirmarRenombre(c.id)}>✓</button>
+                        <button className="btn ia-rename-cancel" onClick={() => { setRenombrando(null); setNuevoTitulo(""); }}>✕</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          className="ia-chat-sesion-btn-inner"
+                          onClick={() => seleccionarChat(c.id)}
+                        >
+                          <span className="ia-chat-sesion-titulo">{c.titulo}</span>
+                          <span className="label">{formatearFechaChat(c.updatedAt)}</span>
+                        </button>
+                        <button
+                          className="btn ia-rename-btn"
+                          title="Renombrar chat"
+                          onClick={e => { e.stopPropagation(); setRenombrando(c.id); setNuevoTitulo(c.titulo); }}
+                        >
+                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+                        </button>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
