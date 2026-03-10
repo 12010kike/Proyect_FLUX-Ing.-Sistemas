@@ -452,7 +452,11 @@ export default function Home() {
   }
 
   async function manejarAbandonarGrupoHome(grupo) {
-    const ok = window.confirm(`¿Abandonar el grupo "${grupo.nombre}"?`);
+    let mensaje = `¿Abandonar el grupo "${grupo.nombre}"?`;
+    if (grupo.isAdmin && (grupo.miembros?.length || 0) > 1) {
+      mensaje = `Eres administrador del grupo "${grupo.nombre}". Si sales, se asignará automáticamente otro miembro como administrador. ¿Continuar?`;
+    }
+    const ok = window.confirm(mensaje);
     if (!ok) return;
     try {
       await abandonarGrupo({ grupoId: grupo.id });

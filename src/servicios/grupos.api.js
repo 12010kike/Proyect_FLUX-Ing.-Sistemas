@@ -429,7 +429,25 @@ export async function abandonarGrupo({ grupoId }) {
   if (sessionError) throw sessionError;
   const user = session?.user;
   if (!user) throw new Error("No hay sesion activa.");
+  // Leer datos del grupo y del miembro que abandona
+  const { data: grupo, error: grupoError } = await supabase
+    .from("grupos")
+    .select("id, creador_id")
+    .eq("id", grupoId)
+    .maybeSingle();
+  if (grupoError) throw grupoError;
 
+  const { data: miembro, error: miembroError } = await supabase
+    .from("grupo_miembros")
+    .select("id, user_id, is_admin, joined_at, display_name")
+    .eq("grupo_id", grupoId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (miembroError) throw miembroError;
+
+  const wasAdmin = Boolean(miembro?.is_admin);
+
+  // Eliminar la membresía del usuario
   const { error: deleteError } = await supabase
     .from("grupo_miembros")
     .delete()
@@ -437,18 +455,87 @@ export async function abandonarGrupo({ grupoId }) {
     .eq("user_id", user.id);
   if (deleteError) throw deleteError;
 
+  // Registrar actividad: el usuario abandonó el grupo
+  try {
+    const nombreSalida = miembro?.display_name || user.user_metadata?.display_name || "Usuario";
+    await supabase.from("grupo_actividad").insert({
+      grupo_id: grupoId,
+      actor_id: user.id,
+      mensaje: `SALIDA::${nombreSalida} abandonó el grupo.`
+    });
+  } catch (actErr) {
+    // No crítico: sólo registrar en consola
+    console.warn("No se pudo registrar actividad de salida:", actErr?.message || actErr);
+  }
+
+  // Contar miembros restantes
   const { count, error: countError } = await supabase
     .from("grupo_miembros")
     .select("id", { count: "exact", head: true })
     .eq("grupo_id", grupoId);
   if (countError) throw countError;
 
+  // Si no quedan miembros, eliminar el grupo
   if (!count || count === 0) {
     const { error: deleteGroupError } = await supabase
       .from("grupos")
       .delete()
       .eq("id", grupoId);
     if (deleteGroupError) throw deleteGroupError;
+    return;
+  }
+
+  // Si el usuario que se fue era admin, asegurarse que exista al menos un admin
+  if (wasAdmin) {
+    const { data: otrosAdmins, error: adminsError } = await supabase
+      .from("grupo_miembros")
+      .select("id, user_id")
+      .eq("grupo_id", grupoId)
+      .eq("is_admin", true)
+      .limit(1);
+    if (adminsError) throw adminsError;
+
+    // Si ya hay otro admin, no hacemos nada
+    if (!otrosAdmins || otrosAdmins.length === 0) {
+      // Promover al miembro con fecha de ingreso más antigua
+      const { data: candidato, error: candidatoError } = await supabase
+        .from("grupo_miembros")
+        .select("id, user_id, display_name")
+        .eq("grupo_id", grupoId)
+        .order("joined_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (candidatoError) throw candidatoError;
+
+      if (candidato && candidato.user_id) {
+        const { error: promoteError } = await supabase
+          .from("grupo_miembros")
+          .update({ is_admin: true })
+          .eq("id", candidato.id);
+        if (promoteError) throw promoteError;
+
+        // Registrar actividad: promoción de miembro a admin
+        try {
+          const nombrePromovido = candidato?.display_name || "Usuario";
+          await supabase.from("grupo_actividad").insert({
+            grupo_id: grupoId,
+            actor_id: user.id,
+            mensaje: `PROMOCION::${nombrePromovido} fue promovido a administrador.`
+          });
+        } catch (actErr) {
+          console.warn("No se pudo registrar actividad de promoción:", actErr?.message || actErr);
+        }
+
+        // Si el creador del grupo era quien se fue, transferir creador_id
+        if (grupo && grupo.creador_id === user.id) {
+          const { error: updateCreatorError } = await supabase
+            .from("grupos")
+            .update({ creador_id: candidato.user_id })
+            .eq("id", grupoId);
+          if (updateCreatorError) throw updateCreatorError;
+        }
+      }
+    }
   }
 }
 

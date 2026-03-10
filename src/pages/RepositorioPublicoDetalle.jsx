@@ -446,7 +446,7 @@ export default function RepositorioPublicoDetalle() {
 
           <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
             <button className="btn" onClick={manejarToggleFavorito} title={isFavorito ? "Quitar favorito" : "Agregar a favoritos"}>
-              {isFavorito ? "★ Favorito" : "☆ Favorito"}
+              {isFavorito ? "★" : "☆"}
             </button>
             
             {/* BOTÓN NUEVO PARA QR */}

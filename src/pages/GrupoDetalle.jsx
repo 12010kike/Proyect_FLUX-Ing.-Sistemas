@@ -786,7 +786,11 @@ export default function GrupoDetalle() {
 
   async function manejarAbandonarGrupo() {
     if (!grupo) return;
-    const ok = window.confirm("Abandonar este grupo? Si eres el último miembro, se eliminará.");
+    let mensaje = "Abandonar este grupo? Si eres el último miembro, se eliminará.";
+    if (esAdmin && (grupo?.miembros?.length || 0) > 1) {
+      mensaje = "Eres administrador. Si sales, se asignará automáticamente otro miembro como administrador. ¿Continuar?";
+    }
+    const ok = window.confirm(mensaje);
     if (!ok) return;
     await abandonarGrupo({ grupoId: grupo.id });
     navigate("/grupos");
