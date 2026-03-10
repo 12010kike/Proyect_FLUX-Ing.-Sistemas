@@ -5,7 +5,8 @@ import {
   listarGruposDelUsuario,
   listarTareasGrupo,
   guardarMensajeChat,
-  listarHistorialChat
+  listarHistorialChat,
+  eliminarHistorialChatPorId
 } from "../servicios/grupos.api";
 import { generarPlanEstudio, chatConIA } from "../servicios/ia.api";
 import "../estilos/flux.css";
@@ -47,6 +48,11 @@ export default function AsistenteIA() {
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [chatsGuardados, setChatsGuardados] = useState([]);
   const [chatActivoId, setChatActivoId] = useState(null);
+  const [titulosPersonalizados, setTitulosPersonalizados] = useState({});
+  const [editandoChatId, setEditandoChatId] = useState(null);
+  const [tituloEditando, setTituloEditando] = useState("");
+  const [menuChatIdAbierto, setMenuChatIdAbierto] = useState(null);
+  const [eliminandoChatId, setEliminandoChatId] = useState(null);
   const chatEndRef = useRef(null);
 
   // ─────────────────────────────────────────────────────────
@@ -120,13 +126,9 @@ export default function AsistenteIA() {
         const historial = await listarHistorialChat();
         const conversaciones = construirConversaciones(historial);
         setChatsGuardados(conversaciones);
-
-        if (conversaciones.length > 0) {
-          setChatActivoId(conversaciones[0].id);
-          setMensajesChat(conversaciones[0].mensajes);
-        } else {
-          iniciarNuevoChat();
-        }
+        setChatActivoId(null);
+        setMensajesChat([]);
+        setMenuChatIdAbierto(null);
       } catch (e) {
         console.error("Error cargando historial de chat:", e);
       } finally {
@@ -137,10 +139,44 @@ export default function AsistenteIA() {
   }, [tabActiva, userId]);
 
   useEffect(() => {
+    if (!userId) return;
+    const key = `flux_chat_titles_${userId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      setTitulosPersonalizados(raw ? JSON.parse(raw) : {});
+    } catch {
+      setTitulosPersonalizados({});
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const key = `flux_chat_titles_${userId}`;
+    localStorage.setItem(key, JSON.stringify(titulosPersonalizados));
+  }, [titulosPersonalizados, userId]);
+
+  useEffect(() => {
     if (tabActiva === "chat") {
       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [mensajesChat, tabActiva]);
+
+  useEffect(() => {
+    if (!menuChatIdAbierto) return;
+
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".classroom-card-menu-wrap")) return;
+      setMenuChatIdAbierto(null);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [menuChatIdAbierto]);
 
   // ─────────────────────────────────────────────────────────
   // Helpers
@@ -195,6 +231,10 @@ export default function AsistenteIA() {
     );
   }
 
+  function obtenerTituloVisual(chat) {
+    return titulosPersonalizados[chat.id] || chat.titulo || "Chat sin título";
+  }
+
   function upsertConversacionLocal({ id, mensajes, updatedAt, tituloBase = "" }) {
     setChatsGuardados(prev => {
       const base = prev.filter(c => c.id !== id);
@@ -216,6 +256,9 @@ export default function AsistenteIA() {
     setChatActivoId(id);
     setMensajesChat([]);
     setErrorChat("");
+    setEditandoChatId(null);
+    setTituloEditando("");
+    setMenuChatIdAbierto(null);
   }
 
   function seleccionarChat(id) {
@@ -224,11 +267,75 @@ export default function AsistenteIA() {
     setChatActivoId(id);
     setMensajesChat(chat.mensajes);
     setErrorChat("");
+    setMenuChatIdAbierto(null);
   }
 
   function formatearFechaChat(fecha) {
     if (!fecha) return "";
     return new Date(fecha).toLocaleDateString();
+  }
+
+  function iniciarEdicionTitulo(chat) {
+    setEditandoChatId(chat.id);
+    setTituloEditando(obtenerTituloVisual(chat));
+    setMenuChatIdAbierto(null);
+  }
+
+  function cancelarEdicionTitulo() {
+    setEditandoChatId(null);
+    setTituloEditando("");
+  }
+
+  function guardarTituloChat(chat) {
+    const limpio = tituloEditando.trim().replace(/\s+/g, " ");
+    if (!limpio) {
+      setTitulosPersonalizados(prev => {
+        const next = { ...prev };
+        delete next[chat.id];
+        return next;
+      });
+    } else {
+      setTitulosPersonalizados(prev => ({ ...prev, [chat.id]: limpio }));
+    }
+    setEditandoChatId(null);
+    setTituloEditando("");
+  }
+
+  function toggleMenuChat(chatId) {
+    setMenuChatIdAbierto(prev => (prev === chatId ? null : chatId));
+  }
+
+  async function eliminarChat(chat) {
+    const confirmar = window.confirm(`¿Seguro que deseas eliminar "${obtenerTituloVisual(chat)}"?`);
+    if (!confirmar) return;
+
+    setMenuChatIdAbierto(null);
+    setEliminandoChatId(chat.id);
+    setErrorChat("");
+
+    try {
+      await eliminarHistorialChatPorId(chat.id);
+      const restantes = chatsGuardados.filter(c => c.id !== chat.id);
+      setChatsGuardados(restantes);
+      setTitulosPersonalizados(prev => {
+        const next = { ...prev };
+        delete next[chat.id];
+        return next;
+      });
+
+      if (chatActivoId === chat.id) {
+        if (restantes.length > 0) {
+          setChatActivoId(restantes[0].id);
+          setMensajesChat(restantes[0].mensajes);
+        } else {
+          iniciarNuevoChat();
+        }
+      }
+    } catch (e) {
+      setErrorChat(e.message || "No se pudo eliminar el chat.");
+    } finally {
+      setEliminandoChatId(null);
+    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -331,6 +438,9 @@ export default function AsistenteIA() {
     );
   }
 
+  const chatActivo = chatsGuardados.find(c => c.id === chatActivoId) || null;
+  const tituloChatActivo = chatActivo ? obtenerTituloVisual(chatActivo) : "Selecciona un chat";
+
   return (
     <div className="container">
       {/* Topbar */}
@@ -380,7 +490,13 @@ export default function AsistenteIA() {
       {tabActiva === "planificador" && (
         <div className="group-tab-content">
           
-          <div className="card">
+          <div
+            className="card"
+            style={{
+              position: "relative",
+              zIndex: menuChatIdAbierto ? 40 : "auto"
+            }}
+          >
             <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem" }}>Tu Contexto Académico</h3>
             
             <div style={{ marginBottom: "16px" }}>
@@ -508,14 +624,96 @@ export default function AsistenteIA() {
             ) : (
               <div className="ia-chat-sesiones-lista" style={{ marginTop: 8 }}>
                 {chatsGuardados.map(c => (
-                  <button
+                  <div
                     key={c.id}
                     className={`ia-chat-sesion-btn ${chatActivoId === c.id ? "active" : ""}`}
-                    onClick={() => seleccionarChat(c.id)}
+                    style={{ position: "relative", display: "flex", alignItems: "center" }}
                   >
-                    <span>{c.titulo}</span>
-                    <span className="label">{formatearFechaChat(c.updatedAt)}</span>
-                  </button>
+                    {editandoChatId === c.id ? (
+                      <div style={{ width: "100%", display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          className="input"
+                          value={tituloEditando}
+                          onChange={e => setTituloEditando(e.target.value)}
+                          placeholder="Nombre del chat"
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              guardarTituloChat(c);
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelarEdicionTitulo();
+                            }
+                          }}
+                        />
+                        <button className="btn btn-secundario" onClick={() => guardarTituloChat(c)}>Guardar</button>
+                        <button className="btn" onClick={cancelarEdicionTitulo}>Cancelar</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          className="btn"
+                          style={{
+                            flex: 1,
+                            justifyContent: "space-between",
+                            display: "flex",
+                            paddingRight: 44
+                          }}
+                          onClick={() => seleccionarChat(c.id)}
+                        >
+                          <span>{obtenerTituloVisual(c)}</span>
+                          <span className="label">{formatearFechaChat(c.updatedAt)}</span>
+                        </button>
+                        <div
+                          className="classroom-card-menu-wrap"
+                          style={{
+                            left: "auto",
+                            right: 8,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            zIndex: 25
+                          }}
+                        >
+                          <button
+                            className="classroom-card-kebab"
+                            aria-label={`Opciones de ${obtenerTituloVisual(c)}`}
+                            onClick={() => toggleMenuChat(c.id)}
+                            disabled={eliminandoChatId === c.id}
+                          >
+                            ⋯
+                          </button>
+
+                          {menuChatIdAbierto === c.id && (
+                            <div
+                              className="classroom-card-menu"
+                              style={{
+                                position: "absolute",
+                                right: 0,
+                                bottom: "calc(100% + 6px)",
+                                zIndex: 999
+                              }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button
+                                className="classroom-card-menu-item"
+                                onClick={() => iniciarEdicionTitulo(c)}
+                              >
+                                Renombrar chat
+                              </button>
+                              <button
+                                className="classroom-card-menu-item danger"
+                                onClick={() => eliminarChat(c)}
+                                disabled={eliminandoChatId === c.id}
+                              >
+                                {eliminandoChatId === c.id ? "Eliminando..." : "Eliminar chat"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -523,7 +721,7 @@ export default function AsistenteIA() {
 
           <div className="card chat-card">
             <div className="chat-header">
-              <strong>Chat con FLUX IA</strong>
+              <strong>Chat con FLUX IA: {tituloChatActivo}</strong>
               <span className="label">Resuelve dudas sobre tus materias o tareas</span>
             </div>
 
@@ -537,8 +735,9 @@ export default function AsistenteIA() {
                 <div className="ia-chat-empty">
                   <span style={{ fontSize: "2.5rem" }}>👋</span>
                   <p>
-                    ¡Hola{displayName ? `, ${displayName.split(" ")[0]}` : ""}! Soy FLUX IA.
-                    ¿En qué te puedo ayudar hoy?
+                    {chatActivoId
+                      ? `¡Hola${displayName ? `, ${displayName.split(" ")[0]}` : ""}! Soy FLUX IA. ¿En qué te puedo ayudar hoy?`
+                      : "Selecciona un chat del historial o crea uno nuevo para empezar."}
                   </p>
                 </div>
               )}

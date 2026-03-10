@@ -19,7 +19,7 @@ Reglas que debes seguir siempre:
 - Trata siempre al estudiante de "tú" y con un tono amigable pero profesional
 `;
 
-const DEFAULT_GEMINI_MODEL = "gemini-1.5-flash";
+const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
 
 function getApiKey() {
   const key = import.meta.env.VITE_GEMINI_API_KEY;
@@ -120,7 +120,41 @@ Organiza la respuesta por días de la semana.`;
 }
 
 // ─────────────────────────────────────────────────────────
-// Tab 2 – Chat libre
+// Tab 2 – Resumidor de Repositorio
+// ─────────────────────────────────────────────────────────
+export async function generarResumenRepositorio({ nombreRepo, archivos }) {
+  const archivosTexto =
+    archivos.length > 0
+      ? archivos
+          .map((a, i) => {
+            const nombre = a.nombre || a.name || `Archivo ${i + 1}`;
+            const tipo = a.mime_type || a.content_type || "archivo";
+            const fecha = a.created_at ? new Date(a.created_at).toLocaleDateString() : "";
+            return `${i + 1}. ${nombre} (${tipo}${fecha ? ", subido el " + fecha : ""})`;
+          })
+          .join("\n")
+      : "El repositorio está vacío, no tiene archivos.";
+
+  const prompt = `Analiza el siguiente repositorio de estudio universitario:
+
+📁 REPOSITORIO: "${nombreRepo}"
+
+📄 ARCHIVOS DISPONIBLES:
+${archivosTexto}
+
+Por favor genera:
+1. 📌 Resumen: ¿Qué temas o contenidos cubre este repositorio basándote en los nombres de los archivos?
+2. 📚 Orden de estudio recomendado: ¿En qué orden deberían revisarse los archivos y por qué?
+3. ⏱️ Estimación de tiempo: ¿Cuánto tiempo aproximado tomaría estudiar todo el material?
+4. 💡 Recomendaciones: Tips concretos para aprovechar mejor este repositorio.
+
+Si el repositorio está vacío, sugiere qué tipos de archivos sería útil agregar según el nombre del repositorio.`;
+
+  return llamarGemini(prompt);
+}
+
+// ─────────────────────────────────────────────────────────
+// Tab 3 – Chat libre
 // ─────────────────────────────────────────────────────────
 export async function chatConIA({ mensajes, contextoUsuario }) {
   const { nombreUsuario, grupos, horario, tareasPendientes } = contextoUsuario;
