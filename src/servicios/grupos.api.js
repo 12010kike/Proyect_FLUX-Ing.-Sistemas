@@ -1606,3 +1606,25 @@ export async function listarHistorialChat() {
     mensaje_usuario: limpiarTagChat(item.mensaje_usuario)
   }));
 }
+
+export async function eliminarHistorialChatPorId(chatId) {
+  if (!chatId) throw new Error("Chat inválido.");
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const userId = session?.user?.id;
+  if (!userId) throw new Error("No hay sesión activa.");
+
+  let query = supabase.from("ia_chats").delete().eq("user_id", userId);
+  if (chatId === "legacy") {
+    query = query.not("mensaje_usuario", "like", "[[CHAT:%");
+  } else {
+    query = query.like("mensaje_usuario", `[[CHAT:${chatId}]]%`);
+  }
+
+  const { error } = await query;
+  if (error) throw error;
+}

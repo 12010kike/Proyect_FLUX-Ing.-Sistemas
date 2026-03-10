@@ -2172,25 +2172,7 @@ select.input {
   gap: 8px;
 }
 
-.ia-chat-sesion-btn {
-  width: 100%;
-  border: 1px solid rgba(37, 52, 63, 0.14);
-  background: rgba(255, 255, 255, 0.82);
-  border-radius: var(--radio-sm);
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  text-align: left;
-  color: var(--texto);
-  cursor: pointer;
-}
-
-.ia-chat-sesion-btn.active {
-  border-color: rgba(255, 155, 81, 0.6);
-  background: rgba(255, 155, 81, 0.12);
-}
+/* .ia-chat-sesion-btn replaced by .ia-chat-sesion-item + .ia-chat-sesion-btn-inner */
 
 /* ── IA: resumen guardado (details/summary) ── */
 .ia-resumen-item {
@@ -2345,11 +2327,299 @@ details[open] .ia-resumen-summary::before {
     width: 100%;
   }
 
-  .ia-chat-sesion-btn {
-    padding: 9px 10px;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
+  .ia-chat-sesion-item {
+    flex-direction: row;
+  }
+}
+
+/* ── IA: calendario semanal ── */
+.ia-calendario-semana {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ia-cal-columna {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ia-cal-dia-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--texto);
+  opacity: 0.4;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.ia-cal-columna.tiene-bloques .ia-cal-dia-header {
+  color: var(--primario);
+  opacity: 1;
+  border-bottom-color: var(--primario);
+}
+
+.ia-cal-vacio {
+  text-align: center;
+  font-size: 12px;
+  color: var(--texto);
+  opacity: 0.2;
+  padding: 6px 0;
+}
+
+.ia-cal-bloque {
+  background: rgba(255, 155, 81, 0.13);
+  border: 1px solid rgba(255, 155, 81, 0.35);
+  border-radius: var(--radio-sm);
+  padding: 4px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ia-cal-hora {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primario);
+  line-height: 1.2;
+}
+
+.ia-cal-tipo {
+  font-size: 9px;
+  color: var(--texto);
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+  .ia-calendario-semana {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ── IA: selector de repositorios en cards ── */
+.ia-repo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.ia-repo-seccion-label {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+
+.ia-repo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.ia-repo-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1.5px solid rgba(37, 52, 63, 0.13);
+  border-radius: var(--radio-md);
+  background: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  text-align: left;
+  color: var(--texto);
+  font-size: 13px;
+  width: 100%;
+  margin-top: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ia-repo-card:hover {
+  border-color: rgba(255, 155, 81, 0.4);
+  background: rgba(255, 155, 81, 0.06);
+}
+
+.ia-repo-card.selected {
+  border-color: var(--primario);
+  background: rgba(255, 155, 81, 0.12);
+}
+
+.ia-repo-icono {
+  color: var(--primario);
+  display: flex;
+  align-items: center;
+}
+
+.ia-repo-nombre {
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* ── IA: chat – item con renombre ── */
+.ia-chat-sesion-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(37, 52, 63, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: var(--radio-sm);
+}
+
+.ia-chat-sesion-item.active {
+  border-color: rgba(255, 155, 81, 0.6);
+  background: rgba(255, 155, 81, 0.12);
+}
+
+.ia-chat-sesion-btn-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--texto);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 14px;
+}
+
+.ia-chat-sesion-titulo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.ia-rename-btn {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  width: auto;
+  margin: 4px 4px 4px 0;
+  opacity: 0.4;
+  line-height: 1;
+  color: var(--texto);
+}
+
+.ia-rename-btn:hover {
+  opacity: 1;
+  color: var(--primario);
+}
+
+.ia-chat-renombrar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.ia-chat-renombrar .input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.ia-rename-ok,
+.ia-rename-cancel {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  width: auto;
+  margin-top: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* ── EditarPerfil: calendario visual de horario ── */
+.horario-calendario {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin: 16px 0 8px;
+}
+
+.horario-cal-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.horario-cal-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--texto);
+  opacity: 0.4;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.horario-cal-col.tiene-bloques .horario-cal-header {
+  color: var(--primario);
+  opacity: 1;
+  border-bottom-color: var(--primario);
+}
+
+.horario-cal-vacio {
+  text-align: center;
+  font-size: 12px;
+  color: var(--texto);
+  opacity: 0.2;
+  padding: 8px 0;
+}
+
+.horario-cal-bloque {
+  background: rgba(255, 155, 81, 0.12);
+  border: 1px solid rgba(255, 155, 81, 0.3);
+  border-radius: var(--radio-sm);
+  padding: 5px 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.15s;
+}
+
+.horario-cal-bloque:hover {
+  background: rgba(255, 155, 81, 0.24);
+}
+
+.horario-cal-hora {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primario);
+  line-height: 1.2;
+}
+
+.horario-cal-tipo {
+  font-size: 9px;
+  color: var(--texto);
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 520px) {
+  .horario-calendario {
+    grid-template-columns: repeat(4, 1fr);
+    overflow-x: auto;
   }
 }
 

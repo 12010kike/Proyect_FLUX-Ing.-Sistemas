@@ -4,13 +4,11 @@ import { supabase } from "../config/supabaseClient";
 import {
   listarGruposDelUsuario,
   listarTareasGrupo,
-  listarRepositoriosCreados,
-  listarArchivosGrupoPorId,
-  listarArchivosRepositorioPublico,
   guardarMensajeChat,
-  listarHistorialChat
+  listarHistorialChat,
+  eliminarHistorialChatPorId
 } from "../servicios/grupos.api";
-import { generarPlanEstudio, generarResumenRepositorio, chatConIA } from "../servicios/ia.api";
+import { generarPlanEstudio, chatConIA } from "../servicios/ia.api";
 import "../estilos/flux.css";
 
 const DIAS = [
@@ -37,25 +35,12 @@ export default function AsistenteIA() {
   const [horario, setHorario] = useState([]);
   const [reposGrupos, setReposGrupos] = useState([]);
   const [cargandoContexto, setCargandoContexto] = useState(false);
+  const [restriccionesPlan, setRestriccionesPlan] = useState(""); // 🟢 NUEVO: Estado para restricciones
   const [generandoPlan, setGenerandoPlan] = useState(false);
   const [planResultado, setPlanResultado] = useState("");
   const [errorPlan, setErrorPlan] = useState("");
 
-  // ── Tab Resumidor ───────────────────────────────────────
-  const reposPublicosRef = useRef([]);
-  const [reposPublicos, setReposPublicos] = useState([]);
-  const [repoSeleccionado, setRepoSeleccionado] = useState("");
-  const [tipoRepoSeleccionado, setTipoRepoSeleccionado] = useState("grupo");
-  const [archivosRepo, setArchivosRepo] = useState([]);
-  const [cargandoArchivos, setCargandoArchivos] = useState(false);
-  const [generandoResumen, setGenerandoResumen] = useState(false);
-  const [resumenResultado, setResumenResultado] = useState("");
-  const [errorResumen, setErrorResumen] = useState("");
-  const [resumenesGuardados, setResumenesGuardados] = useState([]);
-  const [cargandoResumenes, setCargandoResumenes] = useState(false);
-
   // ── Tab Chat ─────────────────────────────────────────────
-  // Formato de mensaje: { role: "user"|"assistant", text: string }
   const [mensajesChat, setMensajesChat] = useState([]);
   const [inputChat, setInputChat] = useState("");
   const [enviandoChat, setEnviandoChat] = useState(false);
@@ -63,6 +48,11 @@ export default function AsistenteIA() {
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [chatsGuardados, setChatsGuardados] = useState([]);
   const [chatActivoId, setChatActivoId] = useState(null);
+  const [titulosPersonalizados, setTitulosPersonalizados] = useState({});
+  const [editandoChatId, setEditandoChatId] = useState(null);
+  const [tituloEditando, setTituloEditando] = useState("");
+  const [menuChatIdAbierto, setMenuChatIdAbierto] = useState(null);
+  const [eliminandoChatId, setEliminandoChatId] = useState(null);
   const chatEndRef = useRef(null);
 
   // ─────────────────────────────────────────────────────────
@@ -85,7 +75,6 @@ export default function AsistenteIA() {
     const cargar = async () => {
       setCargandoContexto(true);
       try {
-        // Horario
         const { data: bloquesData } = await supabase
           .from("bloques_horario")
           .select("id, day_of_week, start_time, end_time, type")
@@ -100,7 +89,6 @@ export default function AsistenteIA() {
         }));
         setHorario(bloques);
 
-        // Grupos + tareas pendientes
         const grupos = await listarGruposDelUsuario();
         setReposGrupos(grupos);
 
@@ -119,11 +107,6 @@ export default function AsistenteIA() {
           })
         );
         setTareasPendientes(todasTareas);
-
-        // Repos públicos creados por el usuario
-        const reposCreados = await listarRepositoriosCreados();
-        setReposPublicos(reposCreados);
-        reposPublicosRef.current = reposCreados;
       } catch (e) {
         console.error("Error cargando contexto IA:", e);
       } finally {
@@ -134,43 +117,6 @@ export default function AsistenteIA() {
     cargar();
   }, [userId]);
 
-  // ─────────────────────────────────────────────────────────
-  // Cargar archivos cuando se selecciona un repo
-  // ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (!repoSeleccionado) {
-      setArchivosRepo([]);
-      return;
-    }
-
-    const cargar = async () => {
-      setCargandoArchivos(true);
-      setResumenResultado("");
-      setErrorResumen("");
-      try {
-        let archivos = [];
-        if (tipoRepoSeleccionado === "grupo") {
-          archivos = await listarArchivosGrupoPorId({ grupoId: repoSeleccionado });
-        } else {
-          archivos = await listarArchivosRepositorioPublico({ repositorioId: repoSeleccionado });
-        }
-        setArchivosRepo(archivos);
-      } catch (e) {
-        setErrorResumen("No se pudieron cargar los archivos: " + e.message);
-      } finally {
-        setCargandoArchivos(false);
-      }
-    };
-
-    cargar();
-  }, [repoSeleccionado, tipoRepoSeleccionado]);
-
-  // Cargar resúmenes guardados al entrar al tab resumidor
-  useEffect(() => {
-    if (tabActiva !== "resumidor" || !userId) return;
-    cargarResumenes();
-  }, [tabActiva, userId]);
-
   // Cargar historial de chat al entrar al tab de chat
   useEffect(() => {
     if (tabActiva !== "chat" || !userId) return;
@@ -180,13 +126,9 @@ export default function AsistenteIA() {
         const historial = await listarHistorialChat();
         const conversaciones = construirConversaciones(historial);
         setChatsGuardados(conversaciones);
-
-        if (conversaciones.length > 0) {
-          setChatActivoId(conversaciones[0].id);
-          setMensajesChat(conversaciones[0].mensajes);
-        } else {
-          iniciarNuevoChat();
-        }
+        setChatActivoId(null);
+        setMensajesChat([]);
+        setMenuChatIdAbierto(null);
       } catch (e) {
         console.error("Error cargando historial de chat:", e);
       } finally {
@@ -196,42 +138,49 @@ export default function AsistenteIA() {
     cargar();
   }, [tabActiva, userId]);
 
-  // Scroll al final del chat
+  useEffect(() => {
+    if (!userId) return;
+    const key = `flux_chat_titles_${userId}`;
+    try {
+      const raw = localStorage.getItem(key);
+      setTitulosPersonalizados(raw ? JSON.parse(raw) : {});
+    } catch {
+      setTitulosPersonalizados({});
+    }
+  }, [userId]);
+
+  useEffect(() => {
+    if (!userId) return;
+    const key = `flux_chat_titles_${userId}`;
+    localStorage.setItem(key, JSON.stringify(titulosPersonalizados));
+  }, [titulosPersonalizados, userId]);
+
   useEffect(() => {
     if (tabActiva === "chat") {
       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [mensajesChat, tabActiva]);
 
+  useEffect(() => {
+    if (!menuChatIdAbierto) return;
+
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest(".classroom-card-menu-wrap")) return;
+      setMenuChatIdAbierto(null);
+    };
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("touchstart", onPointerDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("touchstart", onPointerDown);
+    };
+  }, [menuChatIdAbierto]);
+
   // ─────────────────────────────────────────────────────────
   // Helpers
   // ─────────────────────────────────────────────────────────
-  async function cargarResumenes() {
-    setCargandoResumenes(true);
-    try {
-      const { data, error } = await supabase
-        .from("ia_resumenes")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(10);
-      if (error) throw error;
-      setResumenesGuardados(data || []);
-    } catch (e) {
-      console.error("Error cargando resúmenes:", e);
-    } finally {
-      setCargandoResumenes(false);
-    }
-  }
-
-  function getNombreRepo(id, tipo) {
-    if (tipo === "grupo") {
-      return reposGrupos.find(g => g.id === id)?.nombre || id;
-    }
-    return reposPublicosRef.current.find(r => r.id === id)?.titulo || id;
-  }
-
-  // contextoUsuario estructurado para el chat
   function buildContextoUsuario() {
     return {
       nombreUsuario: displayName,
@@ -282,6 +231,10 @@ export default function AsistenteIA() {
     );
   }
 
+  function obtenerTituloVisual(chat) {
+    return titulosPersonalizados[chat.id] || chat.titulo || "Chat sin título";
+  }
+
   function upsertConversacionLocal({ id, mensajes, updatedAt, tituloBase = "" }) {
     setChatsGuardados(prev => {
       const base = prev.filter(c => c.id !== id);
@@ -303,6 +256,9 @@ export default function AsistenteIA() {
     setChatActivoId(id);
     setMensajesChat([]);
     setErrorChat("");
+    setEditandoChatId(null);
+    setTituloEditando("");
+    setMenuChatIdAbierto(null);
   }
 
   function seleccionarChat(id) {
@@ -311,11 +267,75 @@ export default function AsistenteIA() {
     setChatActivoId(id);
     setMensajesChat(chat.mensajes);
     setErrorChat("");
+    setMenuChatIdAbierto(null);
   }
 
   function formatearFechaChat(fecha) {
     if (!fecha) return "";
     return new Date(fecha).toLocaleDateString();
+  }
+
+  function iniciarEdicionTitulo(chat) {
+    setEditandoChatId(chat.id);
+    setTituloEditando(obtenerTituloVisual(chat));
+    setMenuChatIdAbierto(null);
+  }
+
+  function cancelarEdicionTitulo() {
+    setEditandoChatId(null);
+    setTituloEditando("");
+  }
+
+  function guardarTituloChat(chat) {
+    const limpio = tituloEditando.trim().replace(/\s+/g, " ");
+    if (!limpio) {
+      setTitulosPersonalizados(prev => {
+        const next = { ...prev };
+        delete next[chat.id];
+        return next;
+      });
+    } else {
+      setTitulosPersonalizados(prev => ({ ...prev, [chat.id]: limpio }));
+    }
+    setEditandoChatId(null);
+    setTituloEditando("");
+  }
+
+  function toggleMenuChat(chatId) {
+    setMenuChatIdAbierto(prev => (prev === chatId ? null : chatId));
+  }
+
+  async function eliminarChat(chat) {
+    const confirmar = window.confirm(`¿Seguro que deseas eliminar "${obtenerTituloVisual(chat)}"?`);
+    if (!confirmar) return;
+
+    setMenuChatIdAbierto(null);
+    setEliminandoChatId(chat.id);
+    setErrorChat("");
+
+    try {
+      await eliminarHistorialChatPorId(chat.id);
+      const restantes = chatsGuardados.filter(c => c.id !== chat.id);
+      setChatsGuardados(restantes);
+      setTitulosPersonalizados(prev => {
+        const next = { ...prev };
+        delete next[chat.id];
+        return next;
+      });
+
+      if (chatActivoId === chat.id) {
+        if (restantes.length > 0) {
+          setChatActivoId(restantes[0].id);
+          setMensajesChat(restantes[0].mensajes);
+        } else {
+          iniciarNuevoChat();
+        }
+      }
+    } catch (e) {
+      setErrorChat(e.message || "No se pudo eliminar el chat.");
+    } finally {
+      setEliminandoChatId(null);
+    }
   }
 
   // ─────────────────────────────────────────────────────────
@@ -326,50 +346,16 @@ export default function AsistenteIA() {
     setPlanResultado("");
     setGenerandoPlan(true);
     try {
-      const resultado = await generarPlanEstudio({ tareas: tareasPendientes, horario });
+      const resultado = await generarPlanEstudio({ 
+        tareas: tareasPendientes, 
+        horario,
+        restricciones: restriccionesPlan // 🟢 Se envían las restricciones a la API
+      });
       setPlanResultado(resultado);
     } catch (e) {
       setErrorPlan(e.message);
     } finally {
       setGenerandoPlan(false);
-    }
-  }
-
-  function manejarCambioRepo(e) {
-    const val = e.target.value;
-    if (!val) {
-      setRepoSeleccionado("");
-      setTipoRepoSeleccionado("grupo");
-      return;
-    }
-    const [tipo, id] = val.split("::");
-    setTipoRepoSeleccionado(tipo);
-    setRepoSeleccionado(id);
-  }
-
-  async function manejarGenerarResumen() {
-    if (!repoSeleccionado) return;
-    setErrorResumen("");
-    setResumenResultado("");
-    setGenerandoResumen(true);
-    try {
-      const nombreRepo = getNombreRepo(repoSeleccionado, tipoRepoSeleccionado);
-      const resumen = await generarResumenRepositorio({ nombreRepo, archivos: archivosRepo });
-      setResumenResultado(resumen);
-
-      // Guardar en Supabase
-      await supabase.from("ia_resumenes").insert({
-        user_id: userId,
-        repositorio_tipo: tipoRepoSeleccionado,
-        repositorio_id: repoSeleccionado,
-        repositorio_nombre: nombreRepo,
-        resumen
-      });
-      await cargarResumenes();
-    } catch (e) {
-      setErrorResumen(e.message);
-    } finally {
-      setGenerandoResumen(false);
     }
   }
 
@@ -408,7 +394,6 @@ export default function AsistenteIA() {
         tituloBase: texto
       });
 
-      // Persistir en Supabase (no bloquea la UI si falla)
       guardarMensajeChat({ mensajeUsuario: texto, respuestaIA: respuesta, chatId: chatIdActual }).catch(
         e => console.error("Error guardando chat:", e)
       );
@@ -429,12 +414,12 @@ export default function AsistenteIA() {
   // ─────────────────────────────────────────────────────────
   // Render
   // ─────────────────────────────────────────────────────────
-  const repoSelectValue = repoSeleccionado ? `${tipoRepoSeleccionado}::${repoSeleccionado}` : "";
-
   if (cargandoSesion) {
     return (
       <div className="container">
-        <div className="card">Cargando...</div>
+        <div className="card" style={{ textAlign: "center", padding: "20px" }}>
+          ⏳ Cargando asistente...
+        </div>
       </div>
     );
   }
@@ -442,9 +427,10 @@ export default function AsistenteIA() {
   if (!userId) {
     return (
       <div className="container">
-        <div className="card">
+        <div className="card" style={{ textAlign: "center" }}>
+          <span style={{ fontSize: "2rem" }}>🔒</span>
           <p>Inicia sesión para acceder al asistente IA.</p>
-          <button className="btn btnPrimary" onClick={() => navigate("/auth")}>
+          <button className="btn btnPrimary" onClick={() => navigate("/auth")} style={{ marginTop: "12px" }}>
             Iniciar sesión
           </button>
         </div>
@@ -452,12 +438,15 @@ export default function AsistenteIA() {
     );
   }
 
+  const chatActivo = chatsGuardados.find(c => c.id === chatActivoId) || null;
+  const tituloChatActivo = chatActivo ? obtenerTituloVisual(chatActivo) : "Selecciona un chat";
+
   return (
     <div className="container">
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <div className="logoDot" />
+          <div className="logoDot" style={{ background: "var(--primario)" }} />
           <div>
             <div className="brandTitle">FLUX</div>
             <div className="brandSubtitle">Asistente IA</div>
@@ -469,113 +458,126 @@ export default function AsistenteIA() {
           onClick={() => navigate(-1)}
           aria-label="Atrás"
         >
-          <svg
-            className="arrow-back-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            xmlns="http://www.w3.org/2000/svg"
-            aria-hidden="true"
-          >
-            <path
-              d="M19 12H5M5 12L12 19M5 12L12 5"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
+          <svg className="arrow-back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
         </button>
       </div>
 
       {cargandoContexto && (
         <div className="card" style={{ textAlign: "center", color: "var(--primario)" }}>
-          Cargando tus datos...
+          Cargando tu información académica...
         </div>
       )}
 
-      {/* Tabs */}
+      {/* Tabs Simplificadas (Sin Resumidor) */}
       <div className="group-tabs">
         <button
           className={`group-tab ${tabActiva === "planificador" ? "active" : ""}`}
           onClick={() => setTabActiva("planificador")}
         >
-          Planificador
-        </button>
-        <button
-          className={`group-tab ${tabActiva === "resumidor" ? "active" : ""}`}
-          onClick={() => setTabActiva("resumidor")}
-        >
-          Resumidor
+          🗓️ Planificador
         </button>
         <button
           className={`group-tab ${tabActiva === "chat" ? "active" : ""}`}
           onClick={() => setTabActiva("chat")}
         >
-          Chat libre
+          💬 Chat Libre
         </button>
       </div>
 
       {/* ── TAB 1: Planificador ── */}
       {tabActiva === "planificador" && (
         <div className="group-tab-content">
-          <div className="card">
-            <strong>Tareas pendientes</strong>
-            {tareasPendientes.length === 0 ? (
-              <p className="label" style={{ marginTop: 8 }}>
-                No tienes tareas pendientes en ningún grupo.
-              </p>
-            ) : (
-              <ul className="ia-lista" style={{ marginTop: 8 }}>
-                {tareasPendientes.map(t => (
-                  <li key={t.id} className="ia-lista-item">
-                    <span className="ia-lista-dot" />
-                    <span>
-                      <strong>{t.titulo}</strong>
-                      <span className="label" style={{ marginLeft: 6 }}>({t.grupo_nombre})</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
+          
+          <div
+            className="card"
+            style={{
+              position: "relative",
+              zIndex: menuChatIdAbierto ? 40 : "auto"
+            }}
+          >
+            <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem" }}>Tu Contexto Académico</h3>
+            
+            <div style={{ marginBottom: "16px" }}>
+              <strong>📋 Tareas pendientes</strong>
+              {tareasPendientes.length === 0 ? (
+                <p className="label" style={{ marginTop: 8 }}>
+                  No tienes tareas pendientes. ¡Excelente! 🎉
+                </p>
+              ) : (
+                <ul className="ia-lista" style={{ marginTop: 8 }}>
+                  {tareasPendientes.map(t => (
+                    <li key={t.id} className="ia-lista-item">
+                      <span className="ia-lista-dot" />
+                      <span>
+                        <strong>{t.titulo}</strong>
+                        <span className="label" style={{ marginLeft: 6 }}>({t.grupo_nombre})</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+
+            <hr style={{ border: "none", borderTop: "1px solid var(--borde)", margin: "16px 0" }} />
+
+            <div>
+              <strong>⏰ Tu horario semanal</strong>
+              {horario.length === 0 ? (
+                <p className="label" style={{ marginTop: 8 }}>
+                  Sin horario definido. Agrégalo en tu{" "}
+                  <button
+                    className="btn"
+                    style={{ display: "inline", padding: "0 4px", minHeight: "auto", color: "var(--primario)" }}
+                    onClick={() => navigate("/perfil/editar")}
+                  >
+                    perfil
+                  </button>
+                  {" "}para resultados más precisos.
+                </p>
+              ) : (
+                <div className="ia-horario-grid" style={{ marginTop: 8 }}>
+                  {horario
+                    .slice()
+                    .sort((a, b) =>
+                      a.dayOfWeek === b.dayOfWeek
+                        ? a.startTime.localeCompare(b.startTime)
+                        : a.dayOfWeek - b.dayOfWeek
+                    )
+                    .map(b => {
+                      const dia = DIAS.find(d => d.value === b.dayOfWeek)?.label || "?";
+                      return (
+                        <div key={b.id} className="ia-bloque">
+                          <span className="ia-bloque-dia">{dia}</span>
+                          <span className="ia-bloque-hora">
+                            {b.startTime}–{b.endTime}
+                          </span>
+                          {b.type && <span className="ia-bloque-tipo">{b.type}</span>}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
           </div>
 
+          {/* 🟢 NUEVO: Tarjeta de Restricciones */}
           <div className="card" style={{ marginTop: 12 }}>
-            <strong>Tu horario semanal</strong>
-            {horario.length === 0 ? (
-              <p className="label" style={{ marginTop: 8 }}>
-                Sin horario definido. Agrégalo en{" "}
-                <button
-                  className="btn"
-                  style={{ display: "inline", padding: "0 4px", minHeight: "auto" }}
-                  onClick={() => navigate("/perfil/editar")}
-                >
-                  Editar perfil
-                </button>
-                .
-              </p>
-            ) : (
-              <div className="ia-horario-grid" style={{ marginTop: 8 }}>
-                {horario
-                  .slice()
-                  .sort((a, b) =>
-                    a.dayOfWeek === b.dayOfWeek
-                      ? a.startTime.localeCompare(b.startTime)
-                      : a.dayOfWeek - b.dayOfWeek
-                  )
-                  .map(b => {
-                    const dia = DIAS.find(d => d.value === b.dayOfWeek)?.label || "?";
-                    return (
-                      <div key={b.id} className="ia-bloque">
-                        <span className="ia-bloque-dia">{dia}</span>
-                        <span className="ia-bloque-hora">
-                          {b.startTime}–{b.endTime}
-                        </span>
-                        {b.type && <span className="ia-bloque-tipo">{b.type}</span>}
-                      </div>
-                    );
-                  })}
-              </div>
-            )}
+            <strong style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              ⚙️ Reglas y Preferencias
+            </strong>
+            <p className="label" style={{ marginTop: 4, marginBottom: 12 }}>
+              ¿Tienes alguna limitación? Ej: "No me pongas a estudiar los sábados", "Solo puedo estudiar de 8pm a 10pm".
+            </p>
+            <textarea
+              className="input"
+              rows={2}
+              value={restriccionesPlan}
+              onChange={e => setRestriccionesPlan(e.target.value)}
+              placeholder="Escribe tus reglas aquí (opcional)..."
+              disabled={generandoPlan || cargandoContexto}
+            />
           </div>
 
           {errorPlan && (
@@ -584,143 +586,32 @@ export default function AsistenteIA() {
             </div>
           )}
 
-          <div style={{ marginTop: 12 }}>
+          <div style={{ marginTop: 16 }}>
             <button
               className="btn btnPrimary"
+              style={{ width: "100%", padding: "12px", fontSize: "1.1rem" }}
               onClick={manejarGenerarPlan}
               disabled={generandoPlan || cargandoContexto}
             >
-              {generandoPlan ? "Generando plan..." : "✨ Generar plan de estudio"}
+              {generandoPlan ? "⏳ Analizando tu rutina..." : "✨ Generar Plan de Estudio"}
             </button>
           </div>
 
           {planResultado && (
             <div className="card ia-resultado" style={{ marginTop: 16 }}>
-              <strong style={{ display: "block", marginBottom: 8 }}>Plan generado</strong>
+              <strong style={{ display: "block", marginBottom: 8, fontSize: "1.1rem" }}>🎯 Tu Plan Generado</strong>
               <pre className="ia-pre">{planResultado}</pre>
             </div>
           )}
         </div>
       )}
 
-      {/* ── TAB 2: Resumidor ── */}
-      {tabActiva === "resumidor" && (
-        <div className="group-tab-content">
-          <div className="card">
-            <strong>Selecciona un repositorio</strong>
-            <select
-              className="input"
-              style={{ marginTop: 8 }}
-              value={repoSelectValue}
-              onChange={manejarCambioRepo}
-            >
-              <option value="">— Elige un repositorio —</option>
-              {reposGrupos.length > 0 && (
-                <optgroup label="Mis grupos">
-                  {reposGrupos.map(g => (
-                    <option key={`grupo::${g.id}`} value={`grupo::${g.id}`}>
-                      {g.nombre}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-              {reposPublicos.length > 0 && (
-                <optgroup label="Mis repositorios públicos">
-                  {reposPublicos.map(r => (
-                    <option key={`publico::${r.id}`} value={`publico::${r.id}`}>
-                      {r.titulo}
-                    </option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-
-            {cargandoArchivos && (
-              <p className="label" style={{ marginTop: 8 }}>Cargando archivos...</p>
-            )}
-
-            {repoSeleccionado && !cargandoArchivos && (
-              <div style={{ marginTop: 12 }}>
-                <p className="label">
-                  <strong>Archivos ({archivosRepo.length})</strong>
-                </p>
-                {archivosRepo.length === 0 ? (
-                  <p className="label">Este repositorio no tiene archivos aún.</p>
-                ) : (
-                  <ul className="ia-lista" style={{ marginTop: 6 }}>
-                    {archivosRepo.map((a, i) => (
-                      <li key={a.id || i} className="ia-lista-item">
-                        <span className="ia-lista-dot" />
-                        <span>{a.nombre || a.name}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
-
-            {errorResumen && (
-              <div className="alert alert-error" style={{ marginTop: 12 }}>
-                {errorResumen}
-              </div>
-            )}
-
-            {repoSeleccionado && !cargandoArchivos && (
-              <div style={{ marginTop: 12 }}>
-                <button
-                  className="btn btnPrimary"
-                  onClick={manejarGenerarResumen}
-                  disabled={generandoResumen}
-                >
-                  {generandoResumen ? "Generando resumen..." : "✨ Generar resumen con IA"}
-                </button>
-              </div>
-            )}
-
-            {resumenResultado && (
-              <div className="ia-resultado" style={{ marginTop: 16 }}>
-                <strong style={{ display: "block", marginBottom: 8 }}>Resumen generado</strong>
-                <pre className="ia-pre">{resumenResultado}</pre>
-              </div>
-            )}
-          </div>
-
-          {/* Resúmenes anteriores */}
-          <div className="card" style={{ marginTop: 12 }}>
-            <strong>Resúmenes anteriores</strong>
-            {cargandoResumenes ? (
-              <p className="label" style={{ marginTop: 8 }}>Cargando...</p>
-            ) : resumenesGuardados.length === 0 ? (
-              <p className="label" style={{ marginTop: 8 }}>
-                No hay resúmenes guardados aún.
-              </p>
-            ) : (
-              <div style={{ marginTop: 8 }}>
-                {resumenesGuardados.map(r => (
-                  <details key={r.id} className="ia-resumen-item">
-                    <summary className="ia-resumen-summary">
-                      <span>
-                        {r.repositorio_nombre || getNombreRepo(r.repositorio_id, r.repositorio_tipo)}
-                      </span>
-                      <span className="label">
-                        {new Date(r.created_at).toLocaleDateString()}
-                      </span>
-                    </summary>
-                    <pre className="ia-pre ia-pre-small">{r.resumen}</pre>
-                  </details>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ── TAB 3: Chat libre ── */}
+      {/* ── TAB 2: Chat libre ── */}
       {tabActiva === "chat" && (
         <div className="group-tab-content">
           <div className="card">
             <div className="ia-chat-sesiones-head">
-              <strong>Chats guardados</strong>
+              <strong>Historial de Chats</strong>
               <button className="btn btn-secundario ia-chat-nuevo-btn" onClick={iniciarNuevoChat}>
                 + Nuevo chat
               </button>
@@ -733,14 +624,96 @@ export default function AsistenteIA() {
             ) : (
               <div className="ia-chat-sesiones-lista" style={{ marginTop: 8 }}>
                 {chatsGuardados.map(c => (
-                  <button
+                  <div
                     key={c.id}
                     className={`ia-chat-sesion-btn ${chatActivoId === c.id ? "active" : ""}`}
-                    onClick={() => seleccionarChat(c.id)}
+                    style={{ position: "relative", display: "flex", alignItems: "center" }}
                   >
-                    <span>{c.titulo}</span>
-                    <span className="label">{formatearFechaChat(c.updatedAt)}</span>
-                  </button>
+                    {editandoChatId === c.id ? (
+                      <div style={{ width: "100%", display: "flex", gap: 8, alignItems: "center" }}>
+                        <input
+                          className="input"
+                          value={tituloEditando}
+                          onChange={e => setTituloEditando(e.target.value)}
+                          placeholder="Nombre del chat"
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              guardarTituloChat(c);
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              cancelarEdicionTitulo();
+                            }
+                          }}
+                        />
+                        <button className="btn btn-secundario" onClick={() => guardarTituloChat(c)}>Guardar</button>
+                        <button className="btn" onClick={cancelarEdicionTitulo}>Cancelar</button>
+                      </div>
+                    ) : (
+                      <>
+                        <button
+                          className="btn"
+                          style={{
+                            flex: 1,
+                            justifyContent: "space-between",
+                            display: "flex",
+                            paddingRight: 44
+                          }}
+                          onClick={() => seleccionarChat(c.id)}
+                        >
+                          <span>{obtenerTituloVisual(c)}</span>
+                          <span className="label">{formatearFechaChat(c.updatedAt)}</span>
+                        </button>
+                        <div
+                          className="classroom-card-menu-wrap"
+                          style={{
+                            left: "auto",
+                            right: 8,
+                            top: "50%",
+                            transform: "translateY(-50%)",
+                            zIndex: 25
+                          }}
+                        >
+                          <button
+                            className="classroom-card-kebab"
+                            aria-label={`Opciones de ${obtenerTituloVisual(c)}`}
+                            onClick={() => toggleMenuChat(c.id)}
+                            disabled={eliminandoChatId === c.id}
+                          >
+                            ⋯
+                          </button>
+
+                          {menuChatIdAbierto === c.id && (
+                            <div
+                              className="classroom-card-menu"
+                              style={{
+                                position: "absolute",
+                                right: 0,
+                                bottom: "calc(100% + 6px)",
+                                zIndex: 999
+                              }}
+                              onClick={e => e.stopPropagation()}
+                            >
+                              <button
+                                className="classroom-card-menu-item"
+                                onClick={() => iniciarEdicionTitulo(c)}
+                              >
+                                Renombrar chat
+                              </button>
+                              <button
+                                className="classroom-card-menu-item danger"
+                                onClick={() => eliminarChat(c)}
+                                disabled={eliminandoChatId === c.id}
+                              >
+                                {eliminandoChatId === c.id ? "Eliminando..." : "Eliminar chat"}
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -748,22 +721,23 @@ export default function AsistenteIA() {
 
           <div className="card chat-card">
             <div className="chat-header">
-              <strong>Chat con FLUX IA</strong>
-              <span className="label">Pregúntame sobre tus grupos, tareas o repositorios</span>
+              <strong>Chat con FLUX IA: {tituloChatActivo}</strong>
+              <span className="label">Resuelve dudas sobre tus materias o tareas</span>
             </div>
 
             <div className="ia-chat-messages">
               {cargandoHistorial && (
                 <p className="label" style={{ textAlign: "center", padding: 16 }}>
-                  Cargando historial...
+                  Cargando...
                 </p>
               )}
               {!cargandoHistorial && mensajesChat.length === 0 && (
                 <div className="ia-chat-empty">
-                  <span>✨</span>
+                  <span style={{ fontSize: "2.5rem" }}>👋</span>
                   <p>
-                    ¡Hola{displayName ? `, ${displayName.split(" ")[0]}` : ""}! Soy FLUX IA.
-                    Puedes preguntarme sobre tus tareas, horario o repositorios.
+                    {chatActivoId
+                      ? `¡Hola${displayName ? `, ${displayName.split(" ")[0]}` : ""}! Soy FLUX IA. ¿En qué te puedo ayudar hoy?`
+                      : "Selecciona un chat del historial o crea uno nuevo para empezar."}
                   </p>
                 </div>
               )}
@@ -796,7 +770,7 @@ export default function AsistenteIA() {
                 value={inputChat}
                 onChange={e => setInputChat(e.target.value)}
                 onKeyDown={manejarTeclasChat}
-                placeholder="Escribe tu pregunta... (Enter para enviar)"
+                placeholder="Pregúntame algo... (Enter para enviar)"
                 disabled={enviandoChat}
               />
               <button
@@ -804,7 +778,7 @@ export default function AsistenteIA() {
                 onClick={manejarEnviarChat}
                 disabled={enviandoChat || !inputChat.trim()}
               >
-                {enviandoChat ? "Enviando..." : "Enviar"}
+                {enviandoChat ? "⏳" : "Enviar"}
               </button>
             </div>
           </div>
