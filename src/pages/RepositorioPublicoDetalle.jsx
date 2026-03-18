@@ -56,6 +56,11 @@ export default function RepositorioPublicoDetalle() {
   
   // ESTADO NUEVO PARA EL QR
   const [mostrarQR, setMostrarQR] = useState(false);
+  // ESTADOS PARA PREVISUALIZACION
+  const [mostrarPreview, setMostrarPreview] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewType, setPreviewType] = useState(""); // 'pdf' | 'image'
+  const [previewNombre, setPreviewNombre] = useState("");
 
   const inputRef = useRef(null);
   const esEditor = esCreador || esColaborador;
@@ -279,6 +284,21 @@ export default function RepositorioPublicoDetalle() {
     } catch (e) {
       setMensaje(`Error al eliminar: ${e.message}`);
     }
+  }
+
+  function abrirPreview(url, extension, nombre) {
+    console.log("abrirPreview called", { url, extension, nombre });
+    setPreviewUrl(url);
+    setPreviewType(extension === "pdf" ? "pdf" : "image");
+    setPreviewNombre(nombre || "");
+    setMostrarPreview(true);
+  }
+
+  function cerrarPreview() {
+    setMostrarPreview(false);
+    setPreviewUrl("");
+    setPreviewType("");
+    setPreviewNombre("");
   }
 
   async function manejarAgregarColaborador() {
@@ -636,23 +656,37 @@ export default function RepositorioPublicoDetalle() {
             {archivos.map((file, idx) => {
               const fullPath = file.path;
               const { data } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(fullPath);
+              const pubUrl = data?.publicUrl || data?.publicURL || data?.publicurl || "";
               const nombre = file.nombre || fullPath?.split("/").pop() || "archivo";
               const extension = nombre.split(".").pop().toLowerCase();
               const icono = extension === "pdf" ? "📄" : extension === "docx" ? "📝" : extension === "png" ? "🖼️" : "📎";
               return (
                 <div key={`${file.id || idx}`} className="archivo-card">
-                  <a href={data.publicUrl} target="_blank" rel="noopener noreferrer" className="archivo-link">
+                  <a href={pubUrl} target="_blank" rel="noopener noreferrer" className="archivo-link">
                     <div className="archivo-icon">{icono}</div>
                     <div className="archivo-info">
                       <div className="archivo-nombre">{nombre}</div>
                       <div className="archivo-meta">{file.created_at ? new Date(file.created_at).toLocaleDateString() : ""}</div>
                     </div>
                   </a>
-                  {esEditor && (
-                    <button className="btn" style={{ marginTop: 8 }} onClick={() => manejarEliminarArchivo(file)}>
-                      Eliminar archivo
-                    </button>
-                  )}
+
+                  <div className="archivo-actions">
+                    {esEditor && (
+                      <button type="button" className="btn" onClick={() => manejarEliminarArchivo(file)}>
+                        Eliminar archivo
+                      </button>
+                    )}
+
+                    {(extension === "pdf" || extension === "png") && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => abrirPreview(pubUrl, extension, nombre)}
+                      >
+                        Previsualizar
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
@@ -725,6 +759,54 @@ export default function RepositorioPublicoDetalle() {
       )}
 
       {/* COMPONENTE MODAL DE QR AÑADIDO AL FINAL */}
+      {mostrarPreview && (
+        <div
+          className="preview-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1200,
+            padding: 20
+          }}
+          onClick={cerrarPreview}
+        >
+          <div
+            className="preview-content"
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              maxWidth: "100%",
+              width: "900px",
+              maxHeight: "90%",
+              overflow: "auto",
+              position: "relative",
+              padding: 12
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={cerrarPreview}
+              style={{ position: "absolute", right: 8, top: 8 }}
+              className="btn"
+            >
+              Cerrar
+            </button>
+            <div style={{ marginTop: 32 }}>
+              <strong style={{ display: "block", marginBottom: 8 }}>{previewNombre}</strong>
+              {previewType === "pdf" ? (
+                <iframe src={previewUrl} title={previewNombre} style={{ width: "100%", height: "70vh", border: "none" }} />
+              ) : (
+                <img src={previewUrl} alt={previewNombre} style={{ maxWidth: "100%", maxHeight: "70vh" }} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       <ModalQR 
         isOpen={mostrarQR} 
         onClose={() => setMostrarQR(false)} 

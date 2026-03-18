@@ -916,7 +916,10 @@ select.input {
   border-radius: var(--radio);
   box-shadow: var(--sombra);
   padding: var(--space-4);
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: left;
   transition: all 0.2s ease;
 }
 
@@ -929,6 +932,51 @@ select.input {
 .archivo-icon {
   font-size: 36px;
   margin-bottom: var(--space-2);
+}
+
+/* Ensure cards have consistent height so text/buttons align horizontally */
+.archivo-card {
+  min-height: 260px;
+}
+
+.archivo-card .archivo-info {
+  margin-top: 8px;
+}
+
+.archivo-card .archivo-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+/* Make action buttons full width and contained inside the card */
+.archivo-actions > .btn {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Prevent actions from visually overflowing the card corners */
+.archivo-card {
+  overflow: hidden;
+}
+
+/* Make the link area grow so actions stay pinned to bottom */
+.archivo-link {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  text-decoration: none;
+  color: inherit;
+}
+
+.archivo-nombre {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .archivo-nombre {
