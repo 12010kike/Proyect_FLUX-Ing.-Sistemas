@@ -1533,6 +1533,29 @@ select.input {
   background: linear-gradient(135deg, var(--drawer-a, #31424f), var(--drawer-b, #3f5567));
 }
 
+.drawer-metricas-btn {
+  margin-top: 12px;
+  border: 1px solid rgba(255, 201, 129, 0.72);
+  background: linear-gradient(135deg, #ffd6a2 0%, #ffb868 48%, #ff9d3f 100%);
+  color: #2a1707;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px rgba(255, 155, 81, 0.3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.drawer-metricas-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 12px 22px rgba(255, 155, 81, 0.38);
+}
+
+.drawer-metricas-btn:focus-visible {
+  outline: 2px solid rgba(255, 238, 209, 0.96);
+  outline-offset: 2px;
+}
+
 .drawer-item-name {
   color: #ffffff;
   font-size: 20px;
