@@ -11,7 +11,11 @@ import {
   obtenerVistaPreviaPorCodigo,
   unirseAGrupoPorCodigo
 } from "../servicios/grupos.api";
-import { listarRepositoriosFavoritos, listarRepositoriosCreados } from "../servicios/grupos.api";
+import {
+  listarRepositoriosFavoritos,
+  listarRepositoriosCreados,
+  obtenerTotalesAdminHome
+} from "../servicios/grupos.api";
 import { supabase } from "../config/supabaseClient";
 import {
   PALETA_BANNERS,
@@ -30,6 +34,7 @@ const DIAS = [
 
 const FECHA_OPTIONS = [
   { value: "all", label: "Sin filtro de fecha" },
+  { value: "1w", label: "Última semana" },
   { value: "1m", label: "Último mes" },
   { value: "3m", label: "Últimos 3 meses" },
   { value: "1y", label: "Último año" }
@@ -72,6 +77,14 @@ export default function Home() {
   const [buscandoRepos, setBuscandoRepos] = useState(false);
   const [favoritosRepos, setFavoritosRepos] = useState([]);
   const [misReposCreados, setMisReposCreados] = useState([]);
+  const [totalesAdmin, setTotalesAdmin] = useState({
+    totalGrupos: 0,
+    totalRepositorios: 0,
+    totalUsuarios: 0
+  });
+  const [filtroFechaMetricas, setFiltroFechaMetricas] = useState("all");
+  const [cargandoTotalesAdmin, setCargandoTotalesAdmin] = useState(false);
+  const [esFundadorVista, setEsFundadorVista] = useState(false);
   const [menuGrupoAbiertoId, setMenuGrupoAbiertoId] = useState(null);
   const [grupoEditando, setGrupoEditando] = useState(null);
   const [nuevoNombreGrupoEditar, setNuevoNombreGrupoEditar] = useState("");
@@ -82,6 +95,16 @@ export default function Home() {
     FECHA_OPTIONS.find(o => o.value === filtroFechaRepos)?.label || "Sin filtro de fecha";
   const ratingFiltroLabel =
     RATING_OPTIONS.find(o => o.value === filtroRatingRepos)?.label || "Sin filtro de puntuación";
+  const fechaMetricasLabel =
+    FECHA_OPTIONS.find(o => o.value === filtroFechaMetricas)?.label || "Sin filtro de fecha";
+  const maxTotalAdmin = useMemo(
+    () => Math.max(totalesAdmin.totalGrupos, totalesAdmin.totalRepositorios, totalesAdmin.totalUsuarios, 1),
+    [totalesAdmin]
+  );
+  const mitadEscalaAdmin = useMemo(() => Math.round(maxTotalAdmin / 2), [maxTotalAdmin]);
+  const altoBarraRepos = Math.max((totalesAdmin.totalRepositorios / maxTotalAdmin) * 100, 10);
+  const altoBarraGrupos = Math.max((totalesAdmin.totalGrupos / maxTotalAdmin) * 100, 10);
+  const altoBarraUsuarios = Math.max((totalesAdmin.totalUsuarios / maxTotalAdmin) * 100, 10);
 
   const resumenHorario = useMemo(() => {
     if (!horario.length) return "Sin horario";
@@ -170,6 +193,18 @@ export default function Home() {
     }
   }
 
+  async function cargarTotalesAdminPanel() {
+    try {
+      setCargandoTotalesAdmin(true);
+      const totales = await obtenerTotalesAdminHome({ fechaFiltro: filtroFechaMetricas });
+      setTotalesAdmin(totales);
+    } catch (e) {
+      console.warn("No se pudieron cargar los totales del panel admin:", e.message);
+    } finally {
+      setCargandoTotalesAdmin(false);
+    }
+  }
+
   
 
   useEffect(() => {
@@ -189,6 +224,7 @@ export default function Home() {
           setUserId(null);
           setHorario([]);
           setGruposUsuario([]);
+          setEsFundadorVista(false);
           setTieneSesion(false);
           setError("");
         }
@@ -201,15 +237,24 @@ export default function Home() {
         .from("bloques_horario")
         .select("id, day_of_week, start_time, end_time, type")
         .eq("user_id", user?.id);
+      const { data: perfilData, error: perfilError } = await supabase
+        .from("profiles")
+        .select("is_fundador")
+        .eq("id", user?.id)
+        .maybeSingle();
 
       if (bloquesError) {
         setError("No se pudo cargar el horario.");
+      }
+      if (perfilError) {
+        console.warn("No se pudo cargar el perfil de fundador:", perfilError.message);
       }
 
       if (isMounted) {
         setNombreUsuario(displayName || "");
         setAvatarUrl(avatar || "");
         setUserId(user?.id || null);
+        setEsFundadorVista(Boolean(perfilData?.is_fundador));
         setHorario(
           (bloquesData || []).map(b => ({
             id: b.id,
@@ -373,6 +418,43 @@ export default function Home() {
     };
   }, [menuGrupoAbiertoId]);
 
+  useEffect(() => {
+    if (!tieneSesion || !esFundadorVista) return;
+    cargarTotalesAdminPanel();
+  }, [tieneSesion, esFundadorVista, filtroFechaMetricas]);
+
+  useEffect(() => {
+    if (!tieneSesion || !esFundadorVista) return;
+
+    const channel = supabase
+      .channel(`admin-resumen-home-${userId || "anon"}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "grupos" },
+        () => {
+          cargarTotalesAdminPanel();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "repositorios_publicos" },
+        () => {
+          cargarTotalesAdminPanel();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [tieneSesion, esFundadorVista, userId]);
+
+  useEffect(() => {
+    if (!accionAbierta && !grupoEditando) {
+      setError("");
+    }
+  }, [accionAbierta, grupoEditando]);
+
   async function manejarCambioCodigo(valor) {
     const codigo = valor.toUpperCase();
     setCodigoIngreso(codigo);
@@ -391,12 +473,13 @@ export default function Home() {
     if (!nombreUsuario.trim()) return setError("No se encontró tu display name.");
     if (!nombreGrupo.trim()) return setError("Ingrese el nombre del grupo.");
 
-    const grupo = await crearGrupo({
-      nombreGrupo,
-      nombreUsuario,
-      esPublico: esPublicoNuevoGrupo,
-      colorId: colorNuevoGrupo
-    });
+    try {
+      const grupo = await crearGrupo({
+        nombreGrupo,
+        nombreUsuario,
+        esPublico: esPublicoNuevoGrupo,
+        colorId: colorNuevoGrupo
+      });
 
       setNombreGrupo("");
       setEsPublicoNuevoGrupo(false);
@@ -405,6 +488,9 @@ export default function Home() {
       setFabAbierto(false);
       await cargarGrupos();
       navigate(`/grupos/${grupo.codigo}`);
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function manejarCrearRepoPublico() {
@@ -521,6 +607,106 @@ export default function Home() {
           <div className="logoDot home-header-dot" />
         </div>
       </div>
+
+      {tieneSesion && esFundadorVista && (
+        <div className="card admin-stats-card" style={{ marginBottom: 12 }}>
+          <div className="admin-stats-head">
+            <strong>Panel administrativo</strong>
+            <span className="admin-stats-caption">Estado general de la plataforma</span>
+          </div>
+
+          <div className="admin-stats-filter-wrap">
+            <label className="label admin-stats-filter-label">Rango de fechas</label>
+            <select
+              className="input admin-stats-filter-select"
+              value={filtroFechaMetricas}
+              onChange={e => setFiltroFechaMetricas(e.target.value)}
+            >
+              {FECHA_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
+
+          {cargandoTotalesAdmin ? (
+            <div className="label" style={{ marginBottom: 0 }}>Cargando métricas...</div>
+          ) : (
+            <>
+              <div className="admin-stats-grid">
+                <div className="admin-stat-tile">
+                  <div className="admin-stat-top">
+                    <span className="admin-stat-label">Repositorios</span>
+                    <span className="admin-stat-value">{totalesAdmin.totalRepositorios}</span>
+                  </div>
+                </div>
+
+                <div className="admin-stat-tile">
+                  <div className="admin-stat-top">
+                    <span className="admin-stat-label">Grupos</span>
+                    <span className="admin-stat-value">{totalesAdmin.totalGrupos}</span>
+                  </div>
+                </div>
+
+                <div className="admin-stat-tile">
+                  <div className="admin-stat-top">
+                    <span className="admin-stat-label">Usuarios</span>
+                    <span className="admin-stat-value">{totalesAdmin.totalUsuarios}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="admin-bars-chart" role="img" aria-label={`Gráfico de barras (${fechaMetricasLabel})`}>
+                <div className="admin-bars-body">
+                  <div className="admin-y-axis" aria-hidden="true">
+                    <span>{maxTotalAdmin}</span>
+                    <span>{mitadEscalaAdmin}</span>
+                    <span>0</span>
+                  </div>
+
+                  <div className="admin-bars-plot">
+                    <div className="admin-bars-col">
+                      <div className="admin-bars-bar-wrap">
+                        <div
+                          className="admin-bars-bar repos"
+                          style={{ height: `${altoBarraRepos}%` }}
+                        />
+                      </div>
+                      <div className="admin-bars-label">Repos</div>
+                      <div className="admin-bars-value">{totalesAdmin.totalRepositorios}</div>
+                    </div>
+
+                    <div className="admin-bars-col">
+                      <div className="admin-bars-bar-wrap">
+                        <div
+                          className="admin-bars-bar grupos"
+                          style={{ height: `${altoBarraGrupos}%` }}
+                        />
+                      </div>
+                      <div className="admin-bars-label">Grupos</div>
+                      <div className="admin-bars-value">{totalesAdmin.totalGrupos}</div>
+                    </div>
+
+                    <div className="admin-bars-col">
+                      <div className="admin-bars-bar-wrap">
+                        <div
+                          className="admin-bars-bar usuarios"
+                          style={{ height: `${altoBarraUsuarios}%` }}
+                        />
+                      </div>
+                      <div className="admin-bars-label">Usuarios</div>
+                      <div className="admin-bars-value">{totalesAdmin.totalUsuarios}</div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="label" style={{ marginBottom: 0 }}>
+                Mostrando métricas: {fechaMetricasLabel}
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {misReposCreados && misReposCreados.length > 0 && (
         <div className="card" style={{ marginBottom: 12 }}>
@@ -928,7 +1114,10 @@ export default function Home() {
       </footer>
 
       {accionAbierta && (
-        <div className="modal-overlay" onClick={() => setAccionAbierta("")}>
+        <div className="modal-overlay" onClick={() => {
+          setError("");
+          setAccionAbierta("");
+        }}>
           <div className="modal-content action-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>
@@ -941,6 +1130,8 @@ export default function Home() {
               <button className="modal-close" onClick={() => setAccionAbierta("")}>✕</button>
             </div>
             <div className="modal-body">
+              {error && <div className="alert" style={{ marginBottom: 12 }}>{error}</div>}
+
               {accionAbierta === "crear" && (
                 <>
                   <label className="label">Nombre del grupo</label>
@@ -1038,6 +1229,8 @@ export default function Home() {
               </button>
             </div>
             <div className="modal-body">
+              {error && <div className="alert" style={{ marginBottom: 12 }}>{error}</div>}
+
               <label className="label">Nombre del grupo</label>
               <input
                 className="input"
@@ -1178,7 +1371,7 @@ export default function Home() {
         </div>
       )}
 
-      {error && <div className="alert">{error}</div>}
+      {error && !accionAbierta && !grupoEditando && <div className="alert">{error}</div>}
     </div>
   );
 }
