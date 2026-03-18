@@ -10,6 +10,7 @@ import {
 } from "../servicios/grupos.api";
 import { generarPlanEstudio, chatConIA } from "../servicios/ia.api";
 import "../estilos/flux.css";
+import logoFlux from "../assets/logo-flux.png";
 
 const DIAS = [
   { value: 0, label: "Dom" },
@@ -446,11 +447,8 @@ export default function AsistenteIA() {
       {/* Topbar */}
       <div className="topbar">
         <div className="brand">
-          <div className="logoDot" style={{ background: "var(--primario)" }} />
-          <div>
-            <div className="brandTitle">FLUX</div>
-            <div className="brandSubtitle">Asistente IA</div>
-          </div>
+          <img src={logoFlux} alt="FLUX" className="brand-logo-img brand-logo-small" />
+          <div className="brandSubtitle">Asistente IA</div>
         </div>
         <button
           className="btn arrow-back"

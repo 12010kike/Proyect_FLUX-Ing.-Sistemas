@@ -17,6 +17,7 @@ import {
   obtenerTotalesAdminHome
 } from "../servicios/grupos.api";
 import { supabase } from "../config/supabaseClient";
+import logoFlux from "../assets/logo-flux.png";
 import {
   PALETA_BANNERS,
   obtenerColorEntidad
@@ -603,8 +604,7 @@ export default function Home() {
           ☰
         </button>
         <div className="home-header-title-wrap">
-          <div className="home-header-title">FLUX</div>
-          <div className="logoDot home-header-dot" />
+          <img src={logoFlux} alt="FLUX" className="brand-logo-img brand-logo-small" />
         </div>
       </div>
 
