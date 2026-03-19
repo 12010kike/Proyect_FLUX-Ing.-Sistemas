@@ -134,6 +134,31 @@ body{
   }
 }
 
+.color-picker-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.color-swatch {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 0 0 1px rgba(37, 52, 63, 0.25);
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+
+.color-swatch:hover {
+  transform: scale(1.08);
+}
+
+.color-swatch.selected {
+  box-shadow: 0 0 0 2px var(--texto);
+}
+
 .topbar-right{
   display: flex;
   align-items: center;
@@ -189,6 +214,17 @@ body{
   border-radius: 999px;
   background: linear-gradient(135deg, var(--primario), var(--acento));
   box-shadow: 0 0 0 4px rgba(255, 155, 81, 0.15);
+}
+
+.brand-logo-img {
+  width: 80px;
+  height: 80px;
+  object-fit: contain;
+}
+
+.brand-logo-small {
+  width: 36px;
+  height: 36px;
 }
 
 .brandTitle{
@@ -891,7 +927,10 @@ select.input {
   border-radius: var(--radio);
   box-shadow: var(--sombra);
   padding: var(--space-4);
-  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  text-align: left;
   transition: all 0.2s ease;
 }
 
@@ -904,6 +943,51 @@ select.input {
 .archivo-icon {
   font-size: 36px;
   margin-bottom: var(--space-2);
+}
+
+/* Ensure cards have consistent height so text/buttons align horizontally */
+.archivo-card {
+  min-height: 260px;
+}
+
+.archivo-card .archivo-info {
+  margin-top: 8px;
+}
+
+.archivo-card .archivo-actions {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: flex-end;
+  align-items: stretch;
+}
+
+/* Make action buttons full width and contained inside the card */
+.archivo-actions > .btn {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* Prevent actions from visually overflowing the card corners */
+.archivo-card {
+  overflow: hidden;
+}
+
+/* Make the link area grow so actions stay pinned to bottom */
+.archivo-link {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  text-decoration: none;
+  color: inherit;
+}
+
+.archivo-nombre {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .archivo-nombre {
@@ -1127,6 +1211,192 @@ select.input {
   box-shadow: 0 0 0 6px rgba(255, 155, 81, 0.2);
 }
 
+.admin-stats-card {
+  border: 1px solid rgba(37, 52, 63, 0.16);
+  background:
+    radial-gradient(circle at 88% -15%, rgba(255, 155, 81, 0.2), transparent 42%),
+    radial-gradient(circle at -5% 110%, rgba(37, 52, 63, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.88);
+}
+
+.admin-stats-head {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 12px;
+}
+
+.admin-stats-caption {
+  font-size: 12px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.admin-stats-filter-wrap {
+  margin-bottom: 14px;
+}
+
+.admin-stats-filter-label {
+  margin-bottom: 6px;
+}
+
+.admin-stats-filter-select {
+  margin-bottom: 0;
+}
+
+.admin-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.admin-stat-tile {
+  border: 1px solid rgba(37, 52, 63, 0.12);
+  border-radius: var(--radio);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.admin-stat-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.admin-stat-label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--texto);
+}
+
+.admin-stat-value {
+  font-size: 26px;
+  line-height: 1;
+  font-weight: 800;
+  color: var(--texto);
+}
+
+.admin-bars-chart {
+  --admin-bars-height: 126px;
+  border: 1px solid rgba(37, 52, 63, 0.12);
+  border-radius: var(--radio);
+  background: rgba(255, 255, 255, 0.78);
+  padding: 14px 14px 12px;
+  margin-bottom: 10px;
+}
+
+.admin-bars-body {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+}
+
+.admin-y-axis {
+  height: var(--admin-bars-height);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  border-right: 1px dashed rgba(37, 52, 63, 0.2);
+  padding-right: 8px;
+}
+
+.admin-y-axis span {
+  line-height: 1;
+}
+
+.admin-bars-plot {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.admin-bars-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+}
+
+.admin-bars-bar-wrap {
+  width: 100%;
+  height: var(--admin-bars-height);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px dashed rgba(37, 52, 63, 0.2);
+  background-image: linear-gradient(
+    to top,
+    transparent calc(50% - 0.5px),
+    rgba(37, 52, 63, 0.16) calc(50% - 0.5px),
+    rgba(37, 52, 63, 0.16) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+}
+
+.admin-bars-value {
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--texto);
+  line-height: 1;
+}
+
+.admin-bars-bar {
+  width: min(88px, 70%);
+  min-height: 10px;
+  border-radius: 12px 12px 6px 6px;
+  transition: height 0.35s ease;
+  box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.08);
+}
+
+.admin-bars-bar.repos {
+  background: linear-gradient(180deg, #5ca8f5 0%, #2f7ddf 100%);
+}
+
+.admin-bars-bar.grupos {
+  background: linear-gradient(180deg, #ffbc62 0%, #ff8a2f 100%);
+}
+
+.admin-bars-bar.usuarios {
+  background: linear-gradient(180deg, #81d9af 0%, #2ba56f 100%);
+}
+
+.admin-bars-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.admin-bar-track {
+  width: 100%;
+  height: 9px;
+  border-radius: 999px;
+  background: rgba(37, 52, 63, 0.12);
+  overflow: hidden;
+}
+
+.admin-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 0.35s ease;
+}
+
+.admin-bar-fill.repos {
+  background: linear-gradient(135deg, #2f7ddf, #5ca8f5);
+}
+
+.admin-bar-fill.grupos {
+  background: linear-gradient(135deg, #ff8a2f, #ffbc62);
+}
+
 .menu-button {
   width: 40px;
   height: 40px;
@@ -1320,6 +1590,29 @@ select.input {
 .drawer-item-color {
   border: 1px solid rgba(255, 255, 255, 0.22);
   background: linear-gradient(135deg, var(--drawer-a, #31424f), var(--drawer-b, #3f5567));
+}
+
+.drawer-metricas-btn {
+  margin-top: 12px;
+  border: 1px solid rgba(255, 201, 129, 0.72);
+  background: linear-gradient(135deg, #ffd6a2 0%, #ffb868 48%, #ff9d3f 100%);
+  color: #2a1707;
+  font-weight: 800;
+  text-align: center;
+  letter-spacing: 0.01em;
+  box-shadow: 0 8px 18px rgba(255, 155, 81, 0.3);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease;
+}
+
+.drawer-metricas-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+  box-shadow: 0 12px 22px rgba(255, 155, 81, 0.38);
+}
+
+.drawer-metricas-btn:focus-visible {
+  outline: 2px solid rgba(255, 238, 209, 0.96);
+  outline-offset: 2px;
 }
 
 .drawer-item-name {
@@ -2019,6 +2312,9 @@ select.input {
   .classroom-grid {
     grid-template-columns: 1fr;
   }
+  .admin-stats-grid {
+    grid-template-columns: 1fr;
+  }
   .home-footer {
     height: 66px;
     bottom: 10px;
@@ -2029,4 +2325,584 @@ select.input {
     height: 50px;
     font-size: 32px;
   }
+}
+
+/* ── IA: footer button label ── */
+.home-footer-ia {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--texto);
+}
+
+/* ── IA: lista de ítems ── */
+.ia-lista {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ia-lista-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+}
+
+.ia-lista-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--primario);
+  flex-shrink: 0;
+}
+
+/* ── IA: horario grid ── */
+.ia-horario-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ia-bloque {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: rgba(255, 155, 81, 0.1);
+  border: 1px solid rgba(255, 155, 81, 0.3);
+  border-radius: var(--radio-sm);
+  font-size: 13px;
+}
+
+.ia-bloque-dia {
+  font-weight: 700;
+  color: var(--primario);
+}
+
+.ia-bloque-hora {
+  color: var(--texto);
+}
+
+.ia-bloque-tipo {
+  color: var(--texto);
+  opacity: 0.6;
+  font-size: 11px;
+}
+
+/* ── IA: resultado (pre-formatted text) ── */
+.ia-resultado {
+  background: rgba(255, 155, 81, 0.05);
+  border: 1px solid rgba(255, 155, 81, 0.2);
+  border-radius: var(--radio-md);
+  padding: var(--space-4);
+}
+
+.ia-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--texto);
+  margin: 0;
+}
+
+.ia-pre-small {
+  font-size: 12px;
+}
+
+.ia-pre-chat {
+  font-size: 14px;
+}
+
+/* ── IA: conversaciones guardadas ── */
+.ia-chat-sesiones-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ia-chat-nuevo-btn {
+  width: auto;
+  margin-top: 0;
+  padding: 8px 12px;
+  font-size: 12px;
+}
+
+.ia-chat-sesiones-lista {
+  display: grid;
+  gap: 8px;
+}
+
+/* .ia-chat-sesion-btn replaced by .ia-chat-sesion-item + .ia-chat-sesion-btn-inner */
+
+/* ── IA: resumen guardado (details/summary) ── */
+.ia-resumen-item {
+  border-bottom: 1px solid rgba(37, 52, 63, 0.08);
+  padding: 8px 0;
+}
+
+.ia-resumen-item:last-child {
+  border-bottom: none;
+}
+
+.ia-resumen-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--texto);
+  list-style: none;
+  padding: 4px 0;
+  gap: 12px;
+}
+
+.ia-resumen-summary::-webkit-details-marker {
+  display: none;
+}
+
+.ia-resumen-summary::before {
+  content: "▶";
+  font-size: 10px;
+  color: var(--primario);
+  transition: transform 0.2s;
+  flex-shrink: 0;
+}
+
+details[open] .ia-resumen-summary::before {
+  transform: rotate(90deg);
+}
+
+/* ── IA: chat messages ── */
+.ia-chat-messages {
+  min-height: 200px;
+  max-height: 400px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.ia-chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: var(--space-6) var(--space-4);
+  color: var(--texto);
+  opacity: 0.5;
+  font-size: 14px;
+  text-align: center;
+}
+
+.ia-chat-empty span {
+  font-size: 28px;
+  opacity: 1;
+}
+
+.ia-chat-bubble {
+  max-width: 85%;
+  padding: 10px 14px;
+  border-radius: var(--radio-md);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.ia-bubble-user {
+  align-self: flex-end;
+  background: var(--primario);
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.ia-bubble-user .ia-pre {
+  color: #fff;
+}
+
+.ia-bubble-ia {
+  align-self: flex-start;
+  background: rgba(37, 52, 63, 0.06);
+  color: var(--texto);
+  border-bottom-left-radius: 4px;
+}
+
+.ia-typing {
+  font-style: italic;
+  opacity: 0.6;
+  font-size: 13px;
+}
+
+/* ── IA: ajustes para vista tipo celular ── */
+@media (max-width: 640px) {
+  .group-tabs {
+    flex-wrap: wrap;
+    gap: 6px;
+    border-bottom: 0;
+    padding-bottom: 0;
+  }
+
+  .group-tab {
+    flex: 1 1 calc(50% - 6px);
+    min-height: 38px;
+    text-align: center;
+    background: rgba(37, 52, 63, 0.06);
+  }
+
+  .group-tab.active {
+    background: rgba(255, 155, 81, 0.22);
+  }
+
+  .group-tab-content .card {
+    padding: var(--space-4);
+  }
+
+  .chat-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .ia-chat-messages {
+    max-height: 48vh;
+    min-height: 220px;
+  }
+
+  .ia-chat-bubble {
+    max-width: 92%;
+    padding: 9px 12px;
+  }
+
+  .chat-input .btn {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .ia-chat-sesiones-head {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ia-chat-nuevo-btn {
+    width: 100%;
+  }
+
+  .ia-chat-sesion-item {
+    flex-direction: row;
+  }
+}
+
+/* ── IA: calendario semanal ── */
+.ia-calendario-semana {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.ia-cal-columna {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ia-cal-dia-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--texto);
+  opacity: 0.4;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.ia-cal-columna.tiene-bloques .ia-cal-dia-header {
+  color: var(--primario);
+  opacity: 1;
+  border-bottom-color: var(--primario);
+}
+
+.ia-cal-vacio {
+  text-align: center;
+  font-size: 12px;
+  color: var(--texto);
+  opacity: 0.2;
+  padding: 6px 0;
+}
+
+.ia-cal-bloque {
+  background: rgba(255, 155, 81, 0.13);
+  border: 1px solid rgba(255, 155, 81, 0.35);
+  border-radius: var(--radio-sm);
+  padding: 4px 5px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ia-cal-hora {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primario);
+  line-height: 1.2;
+}
+
+.ia-cal-tipo {
+  font-size: 9px;
+  color: var(--texto);
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 480px) {
+  .ia-calendario-semana {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+
+/* ── IA: selector de repositorios en cards ── */
+.ia-repo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.ia-repo-seccion-label {
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+
+.ia-repo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: 8px;
+}
+
+.ia-repo-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1.5px solid rgba(37, 52, 63, 0.13);
+  border-radius: var(--radio-md);
+  background: rgba(255, 255, 255, 0.7);
+  cursor: pointer;
+  text-align: left;
+  color: var(--texto);
+  font-size: 13px;
+  width: 100%;
+  margin-top: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ia-repo-card:hover {
+  border-color: rgba(255, 155, 81, 0.4);
+  background: rgba(255, 155, 81, 0.06);
+}
+
+.ia-repo-card.selected {
+  border-color: var(--primario);
+  background: rgba(255, 155, 81, 0.12);
+}
+
+.ia-repo-icono {
+  color: var(--primario);
+  display: flex;
+  align-items: center;
+}
+
+.ia-repo-nombre {
+  font-weight: 600;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+/* ── IA: chat – item con renombre ── */
+.ia-chat-sesion-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(37, 52, 63, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  border-radius: var(--radio-sm);
+}
+
+.ia-chat-sesion-item.active {
+  border-color: rgba(255, 155, 81, 0.6);
+  background: rgba(255, 155, 81, 0.12);
+}
+
+.ia-chat-sesion-btn-inner {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--texto);
+  cursor: pointer;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 14px;
+}
+
+.ia-chat-sesion-titulo {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+
+.ia-rename-btn {
+  flex-shrink: 0;
+  padding: 6px 8px;
+  width: auto;
+  margin: 4px 4px 4px 0;
+  opacity: 0.4;
+  line-height: 1;
+  color: var(--texto);
+}
+
+.ia-rename-btn:hover {
+  opacity: 1;
+  color: var(--primario);
+}
+
+.ia-chat-renombrar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 8px;
+  width: 100%;
+}
+
+.ia-chat-renombrar .input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+}
+
+.ia-rename-ok,
+.ia-rename-cancel {
+  flex-shrink: 0;
+  padding: 5px 8px;
+  width: auto;
+  margin-top: 0;
+  font-size: 13px;
+  line-height: 1;
+}
+
+/* ── EditarPerfil: calendario visual de horario ── */
+.horario-calendario {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 6px;
+  margin: 16px 0 8px;
+}
+
+.horario-cal-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.horario-cal-header {
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--texto);
+  opacity: 0.4;
+  padding: 4px 2px;
+  border-bottom: 2px solid transparent;
+}
+
+.horario-cal-col.tiene-bloques .horario-cal-header {
+  color: var(--primario);
+  opacity: 1;
+  border-bottom-color: var(--primario);
+}
+
+.horario-cal-vacio {
+  text-align: center;
+  font-size: 12px;
+  color: var(--texto);
+  opacity: 0.2;
+  padding: 8px 0;
+}
+
+.horario-cal-bloque {
+  background: rgba(255, 155, 81, 0.12);
+  border: 1px solid rgba(255, 155, 81, 0.3);
+  border-radius: var(--radio-sm);
+  padding: 5px 6px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  transition: background 0.15s;
+}
+
+.horario-cal-bloque:hover {
+  background: rgba(255, 155, 81, 0.24);
+}
+
+.horario-cal-hora {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--primario);
+  line-height: 1.2;
+}
+
+.horario-cal-tipo {
+  font-size: 9px;
+  color: var(--texto);
+  opacity: 0.65;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 520px) {
+  .horario-calendario {
+    grid-template-columns: repeat(4, 1fr);
+    overflow-x: auto;
+  }
+}
+
+/* ── Alert helper ── */
+.alert {
+  padding: 10px 14px;
+  border-radius: var(--radio-sm);
+  font-size: 13px;
+}
+
+.alert-error {
+  background: rgba(220, 53, 69, 0.08);
+  border: 1px solid rgba(220, 53, 69, 0.3);
+  color: #c0392b;
 }

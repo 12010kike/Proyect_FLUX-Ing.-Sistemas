@@ -836,6 +836,36 @@ export default function EditarPerfil() {
               )}
             </div>
 
+            {horario.length > 0 && (
+              <div className="horario-calendario">
+                {DIAS.map(dia => {
+                  const bloquesDia = horario
+                    .filter(b => b.dayOfWeek === dia.value)
+                    .sort((a, b) => a.startTime.localeCompare(b.startTime));
+                  return (
+                    <div key={dia.value} className={`horario-cal-col ${bloquesDia.length ? "tiene-bloques" : ""}`}>
+                      <div className="horario-cal-header">{dia.label}</div>
+                      {bloquesDia.length === 0 ? (
+                        <div className="horario-cal-vacio">—</div>
+                      ) : (
+                        bloquesDia.map(b => (
+                          <div
+                            key={b.id}
+                            className="horario-cal-bloque"
+                            title="Clic para editar"
+                            onClick={() => manejarEditarBloque(b)}
+                          >
+                            <span className="horario-cal-hora">{b.startTime}–{b.endTime}</span>
+                            {b.type && <span className="horario-cal-tipo">{b.type}</span>}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             <div className="schedule-list">
               {horario
                 .slice()

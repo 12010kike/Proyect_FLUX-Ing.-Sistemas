@@ -6,11 +6,15 @@ import "./estilos/flux.css"; // Importamos los estilos globales de FLUX
 
 // Importamos las páginas
 import Registro from "./pages/Registro";
+import OlvideContrasena from "./pages/OlvideContrasena";
+import ResetPassword from "./pages/ResetPassword";
 import Home from "./pages/Home";
 import GrupoDetalle from "./pages/GrupoDetalle";
 import EditarPerfil from "./pages/EditarPerfil";
 import DetallesRepositorio from "./pages/DetallesRepositorio";
 import RepositorioPublicoDetalle from "./pages/RepositorioPublicoDetalle";
+import AsistenteIA from "./pages/AsistenteIA";
+import MetricasFundador from "./pages/MetricasFundador";
 
 // Bloquea rutas privadas: si no hay sesión, manda al login
 function RequireAuth({ session, loading, children }) {
@@ -95,6 +99,18 @@ export default function App() {
         }
       />
       <Route
+        path="/auth/forgot"
+        element={
+          <GuestOnly session={session} loading={loadingSession}>
+            <OlvideContrasena />
+          </GuestOnly>
+        }
+      />
+      <Route
+        path="/auth/reset"
+        element={<ResetPassword />}
+      />
+      <Route
         path="/grupos"
         element={
           <Home />
@@ -125,6 +141,22 @@ export default function App() {
         path="/repos-publicos/:id"
         element={
           <RepositorioPublicoDetalle />
+        }
+      />
+      <Route
+        path="/ia"
+        element={
+          <RequireAuth session={session} loading={loadingSession}>
+            <AsistenteIA />
+          </RequireAuth>
+        }
+      />
+      <Route
+        path="/metricas"
+        element={
+          <RequireAuth session={session} loading={loadingSession}>
+            <MetricasFundador />
+          </RequireAuth>
         }
       />
       {/* Redirecciones por defecto */}

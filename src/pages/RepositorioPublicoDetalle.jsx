@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   eliminarRepositorioPublico,
   eliminarArchivoRepositorioPublico,
+  actualizarColorRepositorioPublico,
   guardarCalificacionRepositorioPublico,
   agregarColaboradorPorEmail,
   eliminarColaboradorRepositorioPublico,
@@ -19,6 +20,13 @@ import {
 import { supabase } from "../config/supabaseClient";
 import Estrellas from "../components/Estrellas";
 import ModalQR from "../components/ModalQR"; // Importación del QR
+import { generarResumenRepositorio } from "../servicios/ia.api";
+import {
+  PALETA_BANNERS,
+  guardarColorGuardado,
+  obtenerColorEntidad,
+  obtenerColorGuardado
+} from "../utils/groupColors";
 import "../estilos/flux.css";
 
 export default function RepositorioPublicoDetalle() {
@@ -44,6 +52,7 @@ export default function RepositorioPublicoDetalle() {
   const [ratingTotal, setRatingTotal] = useState(0);
   const [miRating, setMiRating] = useState("");
   const [guardandoRating, setGuardandoRating] = useState(false);
+  const [colorRepoSeleccionado, setColorRepoSeleccionado] = useState(PALETA_BANNERS[0].id);
   
   // ESTADOS PARA EL QR Y LA INVITACIÓN
   const [mostrarQR, setMostrarQR] = useState(false);
@@ -68,6 +77,33 @@ export default function RepositorioPublicoDetalle() {
     }
     const data = await listarArchivosRepositorioPublico({ repositorioId: repoId });
     setArchivos(data);
+  }
+
+  async function manejarResumirConIA() {
+    setIaError("");
+    setIaResumen("");
+    setIaGenerando(true);
+    try {
+      const resumen = await generarResumenRepositorio({
+        nombreRepo: repo.titulo,
+        archivos
+      });
+      setIaResumen(resumen);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        await supabase.from("ia_resumenes").insert({
+          user_id: session.user.id,
+          repositorio_tipo: "publico",
+          repositorio_id: repo.id,
+          resumen
+        });
+      }
+    } catch (e) {
+      setIaError(e.message);
+    } finally {
+      setIaGenerando(false);
+    }
   }
 
   async function cargarRatings(repoId) {
@@ -169,7 +205,18 @@ export default function RepositorioPublicoDetalle() {
   }
 
   const manejarArchivos = files => {
-    const archivosValidos = Array.from(files || []).filter(file => file.size <= 20 * 1024 * 1024);
+    const tiposPermitidos = [
+      "application/pdf",
+      "image/png",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ];
+    const archivos = Array.from(files || []);
+    const archivosValidos = archivos.filter(
+      file => tiposPermitidos.includes(file.type) && file.size <= 20 * 1024 * 1024
+    );
+    if (archivos.length && !archivosValidos.length) {
+      setMensaje("Solo se permiten archivos PDF, DOCX o PNG de hasta 20MB.");
+    }
     setArchivosSeleccionados(archivosValidos);
   };
 
@@ -202,6 +249,21 @@ export default function RepositorioPublicoDetalle() {
     } catch (e) {
       setMensaje(`Error: ${e.message}`);
     }
+  }
+
+  function abrirPreview(url, extension, nombre) {
+    console.log("abrirPreview called", { url, extension, nombre });
+    setPreviewUrl(url);
+    setPreviewType(extension === "pdf" ? "pdf" : "image");
+    setPreviewNombre(nombre || "");
+    setMostrarPreview(true);
+  }
+
+  function cerrarPreview() {
+    setMostrarPreview(false);
+    setPreviewUrl("");
+    setPreviewType("");
+    setPreviewNombre("");
   }
 
   async function manejarAgregarColaborador() {
@@ -266,6 +328,13 @@ export default function RepositorioPublicoDetalle() {
   if (cargando) return <div className="container"><div className="card">Cargando...</div></div>;
   if (!repo) return <div className="container"><div className="card">No encontrado</div></div>;
 
+  const colorRepo = obtenerColorEntidad({
+    tipo: "repo_publico",
+    entidadId: repo.id,
+    identificador: repo.id || repo.titulo || "",
+    colorId: repo.color_id || ""
+  });
+
   return (
     <div className="container">
       {/* Banner Superior */}
@@ -278,15 +347,15 @@ export default function RepositorioPublicoDetalle() {
             <div className="group-banner-title">{repo.titulo}</div>
             <div className="group-banner-subtitle">Público · {repo.creador_nombre}</div>
           </div>
+<<<<<<< HEAD
           <div style={{ display: "flex", gap: 8 }}>
             <button className="btn" onClick={() => setMostrarQR(true)}>📱 QR</button>
-          </div>
-        </div>
-      </div>
+=======
 
-      {/* Navegación de Pestañas */}
-      <div className="group-tabs">
-        <button className={`group-tab ${tabActiva === "info" ? "active" : ""}`} onClick={() => setTabActiva("info")}>Info</button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <button className="btn" onClick={manejarToggleFavorito} title={isFavorito ? "Quitar favorito" : "Agregar a favoritos"}>
+            </button>
+            
         <button className={`group-tab ${tabActiva === "archivos" ? "active" : ""}`} onClick={() => setTabActiva("archivos")}>Archivos</button>
         <button className={`group-tab ${tabActiva === "people" ? "active" : ""}`} onClick={() => setTabActiva("people")}>Personas</button>
       </div>
@@ -296,10 +365,127 @@ export default function RepositorioPublicoDetalle() {
         <div className="group-tab-content">
           <div className="card">
             <strong>{repo.titulo}</strong>
+<<<<<<< HEAD
             <p className="label">Promedio: {Number(ratingPromedio).toFixed(1)}/5 ({ratingTotal} votos)</p>
             <div style={{ marginTop: 20 }}>
               <Estrellas alCalificar={manejarCalificar} />
               {guardandoRating && <p style={{fontSize:12}}>Guardando...</p>}
+=======
+            <div className="label" style={{ marginTop: 8 }}>
+              Creador: {repo.creador_nombre || "Usuario"}
+            </div>
+            <div className="label">
+              Fecha de creación: {repo.created_at ? new Date(repo.created_at).toLocaleDateString() : "-"}
+            </div>
+            <div className="label">
+              {ratingTotal
+                ? `Calificacion promedio: ${Number(ratingPromedio || 0).toFixed(1)}/5 (${ratingTotal})`
+                : "Calificacion promedio: sin calificaciones"}
+            </div>
+            <div className="label" style={{ marginBottom: 0 }}>
+              Este repositorio es público y no está vinculado a un grupo.
+            </div>
+            
+            <div style={{ marginTop: 20, borderTop: "1px solid #eee", paddingTop: 10 }}>
+              {userId ? (
+                <>
+                  <Estrellas alCalificar={manejarCalificar} />
+                  {guardandoRating && <p style={{fontSize:"12px", color:"#999"}}>Guardando...</p>}
+                </>
+              ) : (
+                <div className="label">Inicia sesion para calificar.</div>
+              )}
+            </div>
+
+            {/* Botón IA */}
+            <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 14 }}>
+              <button
+                className="btn btnPrimary"
+                onClick={manejarResumirConIA}
+                disabled={iaGenerando}
+              >
+                {iaGenerando ? "Generando resumen..." : "✨ Resumir con IA"}
+              </button>
+              {iaError && (
+                <div className="alert alert-error" style={{ marginTop: 10 }}>
+                  {iaError}
+                </div>
+              )}
+              {iaResumen && (
+                <div className="ia-resultado" style={{ marginTop: 14 }}>
+                  <strong style={{ display: "block", marginBottom: 8 }}>Resumen IA</strong>
+                  <pre className="ia-pre">{iaResumen}</pre>
+                </div>
+              )}
+            </div>
+
+            {esCreador && (
+              <div style={{ marginTop: 12 }}>
+                <button className="btn" onClick={manejarEliminarRepositorio}>
+                  Eliminar repositorio
+                </button>
+              </div>
+            )}
+
+            {esCreador && (
+              <div style={{ marginTop: 12 }}>
+                <label className="label">Color del repositorio</label>
+                <div className="color-picker-row">
+                  {PALETA_BANNERS.map(color => (
+                    <button
+                      key={color.id}
+                      type="button"
+                      className={`color-swatch ${colorRepoSeleccionado === color.id ? "selected" : ""}`}
+                      style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                      onClick={() => setColorRepoSeleccionado(color.id)}
+                      aria-label={`Color ${color.id}`}
+                    />
+                  ))}
+                </div>
+                <button className="btn btnPrimary" onClick={manejarGuardarColorRepositorio}>
+                  Guardar color
+                </button>
+              </div>
+            )}
+          </div>
+
+          <div style={{ marginTop: 12 }}>
+            <div className="card">
+              <strong>Anuncios</strong>
+              {esCreador && (
+                <div style={{ marginTop: 8 }}>
+                  <textarea
+                    className="input"
+                    rows={3}
+                    value={nuevoAnuncio}
+                    onChange={e => setNuevoAnuncio(e.target.value)}
+                    placeholder="Escribe un anuncio para este repositorio público..."
+                  />
+                  <div style={{ marginTop: 8 }}>
+                    <button className="btn btnPrimary" onClick={publicarAnuncio}>Publicar anuncio</button>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ marginTop: 12 }}>
+                {actividad.length === 0 ? (
+                  <div className="label">Aún no hay anuncios.</div>
+                ) : (
+                  actividad.map((a, i) => (
+                    <div key={`${a.fecha}-${i}`} className="feed-card" style={{ marginBottom: 8 }}>
+                      <div className="feed-card-header">
+                        <div className="feed-avatar">{(a.actor_id || "U").slice(0,1).toUpperCase()}</div>
+                        <div>
+                          <div className="feed-author">Anuncio</div>
+                          <div className="feed-date">{a.fecha ? new Date(a.fecha).toLocaleString() : ""}</div>
+                        </div>
+                      </div>
+                      <div className="feed-text">{`${a.mensaje || ""}`.replace(/^ANUNCIO::/, "")}</div>
+                    </div>
+                  ))
+                )}
+              </div>
+>>>>>>> efc0b23ac3f1c8a1c1d25c77f72cc5fa40a070ba
             </div>
           </div>
         </div>
@@ -308,9 +494,25 @@ export default function RepositorioPublicoDetalle() {
       {tabActiva === "archivos" && (
         <div className="group-tab-content">
           {esEditor && (
+<<<<<<< HEAD
             <div className="card repo-card">
               <div className="drop-area" onClick={() => inputRef.current?.click()}>
                 {archivosSeleccionados.length > 0 ? `${archivosSeleccionados.length} listos` : "Toca para subir archivos"}
+=======
+            <div className="card repo-card" style={{ maxWidth: "none", marginTop: 12 }}>
+              <strong className="repo-title">Subir archivos</strong>
+              <p className="label repo-subtitle">Máximo 20MB por archivo</p>
+
+              <div className="drop-area" onClick={() => inputRef.current?.click()} onDrop={manejarDrop} onDragOver={manejarDragOver}>
+                <div className="drop-content">
+                  <p className="repo-hint">
+                    {archivosSeleccionados.length > 0
+                      ? `${archivosSeleccionados.length} archivo(s) seleccionado(s)`
+                      : "Arrastra archivos aquí o haz click para seleccionar"}
+                  </p>
+                  <small className="label">PDF, DOCX, PNG hasta 20MB</small>
+                </div>
+>>>>>>> efc0b23ac3f1c8a1c1d25c77f72cc5fa40a070ba
               </div>
               <input ref={inputRef} type="file" multiple hidden onChange={e => manejarArchivos(e.target.files)} />
               <button className="btn btnPrimary" onClick={manejarSubirArchivos} disabled={subiendo} style={{marginTop:10}}>
@@ -318,11 +520,50 @@ export default function RepositorioPublicoDetalle() {
               </button>
             </div>
           )}
+<<<<<<< HEAD
           <div className="archivos-grid">
             {archivos.map(file => (
               <div key={file.id} className="archivo-card">
                 <div className="archivo-info">
                   <span className="archivo-nombre">{file.nombre}</span>
+=======
+
+          <div className="archivos-grid" style={{ marginTop: 12 }}>
+            {archivos.map((file, idx) => {
+              const fullPath = file.path;
+              const { data } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(fullPath);
+              const pubUrl = data?.publicUrl || data?.publicURL || data?.publicurl || "";
+              const nombre = file.nombre || fullPath?.split("/").pop() || "archivo";
+              const extension = nombre.split(".").pop().toLowerCase();
+              const icono = extension === "pdf" ? "📄" : extension === "docx" ? "📝" : extension === "png" ? "🖼️" : "📎";
+              return (
+                <div key={`${file.id || idx}`} className="archivo-card">
+                  <a href={pubUrl} target="_blank" rel="noopener noreferrer" className="archivo-link">
+                    <div className="archivo-icon">{icono}</div>
+                    <div className="archivo-info">
+                      <div className="archivo-nombre">{nombre}</div>
+                      <div className="archivo-meta">{file.created_at ? new Date(file.created_at).toLocaleDateString() : ""}</div>
+                    </div>
+                  </a>
+
+                  <div className="archivo-actions">
+                    {esEditor && (
+                      <button type="button" className="btn" onClick={() => manejarEliminarArchivo(file)}>
+                        Eliminar archivo
+                      </button>
+                    )}
+
+                    {(extension === "pdf" || extension === "png") && (
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => abrirPreview(pubUrl, extension, nombre)}
+                      >
+                        Previsualizar
+                      </button>
+                    )}
+                  </div>
+>>>>>>> efc0b23ac3f1c8a1c1d25c77f72cc5fa40a070ba
                 </div>
                 {esEditor && <button className="btn" onClick={() => manejarEliminarArchivo(file)}>Eliminar</button>}
               </div>
@@ -346,7 +587,59 @@ export default function RepositorioPublicoDetalle() {
         </div>
       )}
 
+<<<<<<< HEAD
       {/* Modales */}
+=======
+      {/* COMPONENTE MODAL DE QR AÑADIDO AL FINAL */}
+      {mostrarPreview && (
+        <div
+          className="preview-overlay"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.6)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1200,
+            padding: 20
+          }}
+          onClick={cerrarPreview}
+        >
+          <div
+            className="preview-content"
+            style={{
+              background: "#fff",
+              borderRadius: 8,
+              maxWidth: "100%",
+              width: "900px",
+              maxHeight: "90%",
+              overflow: "auto",
+              position: "relative",
+              padding: 12
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={cerrarPreview}
+              style={{ position: "absolute", right: 8, top: 8 }}
+              className="btn"
+            >
+              Cerrar
+            </button>
+            <div style={{ marginTop: 32 }}>
+              <strong style={{ display: "block", marginBottom: 8 }}>{previewNombre}</strong>
+              {previewType === "pdf" ? (
+                <iframe src={previewUrl} title={previewNombre} style={{ width: "100%", height: "70vh", border: "none" }} />
+              ) : (
+                <img src={previewUrl} alt={previewNombre} style={{ maxWidth: "100%", maxHeight: "70vh" }} />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+>>>>>>> efc0b23ac3f1c8a1c1d25c77f72cc5fa40a070ba
       <ModalQR 
         isOpen={mostrarQR} 
         onClose={() => setMostrarQR(false)} 

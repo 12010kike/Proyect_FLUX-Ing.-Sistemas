@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   abandonarGrupo,
+  actualizarColorGrupo,
   actualizarNombreGrupo,
   buscarRepositoriosPublicos,
   crearGrupo,
@@ -10,9 +11,16 @@ import {
   obtenerVistaPreviaPorCodigo,
   unirseAGrupoPorCodigo
 } from "../servicios/grupos.api";
-import { listarRepositoriosFavoritos, listarRepositoriosCreados } from "../servicios/grupos.api";
+import {
+  listarRepositoriosFavoritos,
+  listarRepositoriosCreados
+} from "../servicios/grupos.api";
 import { supabase } from "../config/supabaseClient";
-import { obtenerColorGrupo } from "../utils/groupColors";
+import logoFlux from "../assets/logo-flux.png";
+import {
+  PALETA_BANNERS,
+  obtenerColorEntidad
+} from "../utils/groupColors";
 
 const DIAS = [
   { value: 1, label: "Lun" },
@@ -26,6 +34,7 @@ const DIAS = [
 
 const FECHA_OPTIONS = [
   { value: "all", label: "Sin filtro de fecha" },
+  { value: "1w", label: "Última semana" },
   { value: "1m", label: "Último mes" },
   { value: "3m", label: "Últimos 3 meses" },
   { value: "1y", label: "Último año" }
@@ -45,7 +54,9 @@ export default function Home() {
   const [codigoIngreso, setCodigoIngreso] = useState("");
   const [nombreGrupo, setNombreGrupo] = useState("");
   const [esPublicoNuevoGrupo, setEsPublicoNuevoGrupo] = useState(false);
+  const [colorNuevoGrupo, setColorNuevoGrupo] = useState(PALETA_BANNERS[0].id);
   const [tituloRepoPublico, setTituloRepoPublico] = useState("");
+  const [colorNuevoRepo, setColorNuevoRepo] = useState(PALETA_BANNERS[0].id);
   const [vistaPrevia, setVistaPrevia] = useState(null);
   const [error, setError] = useState("");
   const [gruposUsuario, setGruposUsuario] = useState([]);
@@ -66,9 +77,11 @@ export default function Home() {
   const [buscandoRepos, setBuscandoRepos] = useState(false);
   const [favoritosRepos, setFavoritosRepos] = useState([]);
   const [misReposCreados, setMisReposCreados] = useState([]);
+  const [esFundadorVista, setEsFundadorVista] = useState(false);
   const [menuGrupoAbiertoId, setMenuGrupoAbiertoId] = useState(null);
   const [grupoEditando, setGrupoEditando] = useState(null);
   const [nuevoNombreGrupoEditar, setNuevoNombreGrupoEditar] = useState("");
+  const [colorGrupoEditar, setColorGrupoEditar] = useState(PALETA_BANNERS[0].id);
   const [tieneSesion, setTieneSesion] = useState(false);
   const toastTimeoutRef = useRef(null);
   const fechaFiltroLabel =
@@ -163,8 +176,6 @@ export default function Home() {
     }
   }
 
-  
-
   useEffect(() => {
     let isMounted = true;
 
@@ -182,6 +193,7 @@ export default function Home() {
           setUserId(null);
           setHorario([]);
           setGruposUsuario([]);
+          setEsFundadorVista(false);
           setTieneSesion(false);
           setError("");
         }
@@ -194,15 +206,24 @@ export default function Home() {
         .from("bloques_horario")
         .select("id, day_of_week, start_time, end_time, type")
         .eq("user_id", user?.id);
+      const { data: perfilData, error: perfilError } = await supabase
+        .from("profiles")
+        .select("is_fundador")
+        .eq("id", user?.id)
+        .maybeSingle();
 
       if (bloquesError) {
         setError("No se pudo cargar el horario.");
+      }
+      if (perfilError) {
+        console.warn("No se pudo cargar el perfil de fundador:", perfilError.message);
       }
 
       if (isMounted) {
         setNombreUsuario(displayName || "");
         setAvatarUrl(avatar || "");
         setUserId(user?.id || null);
+        setEsFundadorVista(Boolean(perfilData?.is_fundador));
         setHorario(
           (bloquesData || []).map(b => ({
             id: b.id,
@@ -366,6 +387,12 @@ export default function Home() {
     };
   }, [menuGrupoAbiertoId]);
 
+  useEffect(() => {
+    if (!accionAbierta && !grupoEditando) {
+      setError("");
+    }
+  }, [accionAbierta, grupoEditando]);
+
   async function manejarCambioCodigo(valor) {
     const codigo = valor.toUpperCase();
     setCodigoIngreso(codigo);
@@ -384,18 +411,24 @@ export default function Home() {
     if (!nombreUsuario.trim()) return setError("No se encontró tu display name.");
     if (!nombreGrupo.trim()) return setError("Ingrese el nombre del grupo.");
 
-    const grupo = await crearGrupo({
-      nombreGrupo,
-      nombreUsuario,
-      esPublico: esPublicoNuevoGrupo
-    });
+    try {
+      const grupo = await crearGrupo({
+        nombreGrupo,
+        nombreUsuario,
+        esPublico: esPublicoNuevoGrupo,
+        colorId: colorNuevoGrupo
+      });
 
       setNombreGrupo("");
       setEsPublicoNuevoGrupo(false);
+      setColorNuevoGrupo(PALETA_BANNERS[0].id);
       setAccionAbierta("");
       setFabAbierto(false);
       await cargarGrupos();
       navigate(`/grupos/${grupo.codigo}`);
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function manejarCrearRepoPublico() {
@@ -407,9 +440,11 @@ export default function Home() {
     try {
       const repo = await crearRepositorioPublico({
         titulo: tituloRepoPublico,
-        creadorNombre: nombreUsuario
+        creadorNombre: nombreUsuario,
+        colorId: colorNuevoRepo
       });
       setTituloRepoPublico("");
+      setColorNuevoRepo(PALETA_BANNERS[0].id);
       setAccionAbierta("");
       setFabAbierto(false);
       navigate(`/repos-publicos/${repo.id}`);
@@ -441,7 +476,11 @@ export default function Home() {
   }
 
   async function manejarAbandonarGrupoHome(grupo) {
-    const ok = window.confirm(`¿Abandonar el grupo "${grupo.nombre}"?`);
+    let mensaje = `¿Abandonar el grupo "${grupo.nombre}"?`;
+    if (grupo.isAdmin && (grupo.miembros?.length || 0) > 1) {
+      mensaje = `Eres administrador del grupo "${grupo.nombre}". Si sales, se asignará automáticamente otro miembro como administrador. ¿Continuar?`;
+    }
+    const ok = window.confirm(mensaje);
     if (!ok) return;
     try {
       await abandonarGrupo({ grupoId: grupo.id });
@@ -463,8 +502,15 @@ export default function Home() {
         actorNombre: nombreUsuario,
         nombreAnterior: grupoEditando.nombre || ""
       });
+      await actualizarColorGrupo({
+        grupoId: grupoEditando.id,
+        colorId: colorGrupoEditar,
+        actorId: userId,
+        actorNombre: nombreUsuario
+      });
       setGrupoEditando(null);
       setNuevoNombreGrupoEditar("");
+      setColorGrupoEditar(PALETA_BANNERS[0].id);
       await cargarGrupos();
     } catch (e) {
       setError(e.message);
@@ -495,7 +541,7 @@ export default function Home() {
           ☰
         </button>
         <div className="home-header-title-wrap">
-          <div className="home-header-title">FLUX</div>
+                    <div className="home-header-title">FLUX</div>
           <div className="logoDot home-header-dot" />
         </div>
       </div>
@@ -511,7 +557,12 @@ export default function Home() {
                 .join("")
                 .slice(0, 2)
                 .toUpperCase();
-              const color = obtenerColorGrupo(r.id || r.titulo || "");
+              const color = obtenerColorEntidad({
+                tipo: "repo_publico",
+                entidadId: r.id,
+                identificador: r.id || r.titulo || "",
+                colorId: r.color_id || ""
+              });
               return (
                 <button key={r.id} className="classroom-card" onClick={() => navigate(`/repos-publicos/${r.id}`)}>
                   <div className="classroom-card-banner" style={{ "--banner-a": color.a, "--banner-b": color.b }}>
@@ -539,7 +590,12 @@ export default function Home() {
                 .join("")
                 .slice(0, 2)
                 .toUpperCase();
-              const color = obtenerColorGrupo(r.id || r.titulo || "");
+              const color = obtenerColorEntidad({
+                tipo: "repo_publico",
+                entidadId: r.id,
+                identificador: r.id || r.titulo || "",
+                colorId: r.color_id || ""
+              });
               return (
                 <button key={r.id} className="classroom-card" onClick={() => navigate(`/repos-publicos/${r.id}`)}>
                   <div className="classroom-card-banner" style={{ "--banner-a": color.a, "--banner-b": color.b }}>
@@ -567,7 +623,12 @@ export default function Home() {
                 .join("")
                 .slice(0, 2)
                 .toUpperCase();
-              const color = obtenerColorGrupo(grupo.codigo || grupo.nombre || "");
+              const color = obtenerColorEntidad({
+                tipo: "grupo",
+                entidadId: grupo.id,
+                identificador: grupo.codigo || grupo.nombre || grupo.id || "",
+                colorId: grupo.color_id || ""
+              });
 
               return (
                 <button
@@ -606,10 +667,11 @@ export default function Home() {
                               onClick={() => {
                                 setGrupoEditando(grupo);
                                 setNuevoNombreGrupoEditar(grupo.nombre || "");
+                                setColorGrupoEditar(grupo.color_id || PALETA_BANNERS[0].id);
                                 setMenuGrupoAbiertoId(null);
                               }}
                             >
-                              Editar nombre
+                              Editar grupo
                             </button>
                           )}
                           <button
@@ -668,7 +730,12 @@ export default function Home() {
                         .join("")
                         .slice(0, 2)
                         .toUpperCase();
-                      const color = obtenerColorGrupo(g.codigo || g.nombre || "");
+                      const color = obtenerColorEntidad({
+                        tipo: "grupo",
+                        entidadId: `ejemplo-${i}`,
+                        identificador: g.codigo || g.nombre || `ejemplo-${i}`,
+                        colorId: ""
+                      });
                       return (
                         <button
                           key={i}
@@ -722,13 +789,20 @@ export default function Home() {
             <div className="drawer-list">
               {tieneSesion ? (
                 <>
-                  {gruposUsuario.map(g => (
+                  {gruposUsuario.map(g => {
+                    const colorGrupo = obtenerColorEntidad({
+                      tipo: "grupo",
+                      entidadId: g.id,
+                      identificador: g.codigo || g.nombre || g.id || "",
+                      colorId: g.color_id || ""
+                    });
+                    return (
                     <button
                       key={g.id}
                       className="drawer-item drawer-item-color"
                       style={{
-                        "--drawer-a": obtenerColorGrupo(g.codigo || g.nombre || "").a,
-                        "--drawer-b": obtenerColorGrupo(g.codigo || g.nombre || "").b
+                        "--drawer-a": colorGrupo.a,
+                        "--drawer-b": colorGrupo.b
                       }}
                       onClick={() => {
                         setMenuAbierto(false);
@@ -738,7 +812,8 @@ export default function Home() {
                       <span className="drawer-item-name">{g.nombre}</span>
                       <small className="drawer-item-code">{g.codigo}</small>
                     </button>
-                  ))}
+                    );
+                  })}
                   {gruposUsuario.length === 0 && <div className="label">Sin grupos</div>}
                 </>
               ) : (
@@ -767,6 +842,18 @@ export default function Home() {
               )
             ) : (
               <div className="drawer-horario">Disponible al iniciar sesión</div>
+            )}
+
+            {tieneSesion && esFundadorVista && (
+              <button
+                className="drawer-item drawer-metricas-btn"
+                onClick={() => {
+                  setMenuAbierto(false);
+                  navigate("/metricas");
+                }}
+              >
+                Ver metricas
+              </button>
             )}
           </div>
         </aside>
@@ -807,7 +894,7 @@ export default function Home() {
         </div>
       )}
 
-      <footer className="home-footer">
+      <footer className="home-footer" style={{ justifyContent: "space-evenly" }}>
         <button
           className="home-footer-btn"
           aria-label="Buscar grupos"
@@ -821,6 +908,23 @@ export default function Home() {
             <circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" strokeWidth="2" />
             <path d="M20 20L16.8 16.8" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
           </svg>
+        </button>
+
+        <button
+          className="home-footer-btn"
+          aria-label="Asistente IA"
+          onClick={() => {
+            if (!tieneSesion) {
+              setError("Inicia sesión para acceder al asistente IA.");
+              return;
+            }
+            navigate("/ia");
+          }}
+        >
+          <div className="home-footer-ia">
+            <span style={{ fontSize: 18, lineHeight: 1 }}>✨</span>
+            <span>IA</span>
+          </div>
         </button>
 
         <button
@@ -860,7 +964,10 @@ export default function Home() {
       </footer>
 
       {accionAbierta && (
-        <div className="modal-overlay" onClick={() => setAccionAbierta("")}>
+        <div className="modal-overlay" onClick={() => {
+          setError("");
+          setAccionAbierta("");
+        }}>
           <div className="modal-content action-modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h3>
@@ -873,6 +980,8 @@ export default function Home() {
               <button className="modal-close" onClick={() => setAccionAbierta("")}>✕</button>
             </div>
             <div className="modal-body">
+              {error && <div className="alert" style={{ marginBottom: 12 }}>{error}</div>}
+
               {accionAbierta === "crear" && (
                 <>
                   <label className="label">Nombre del grupo</label>
@@ -882,6 +991,19 @@ export default function Home() {
                     onChange={e => setNombreGrupo(e.target.value)}
                     placeholder="Ej: Cálculo II - Parcial 1"
                   />
+                  <label className="label">Color del grupo</label>
+                  <div className="color-picker-row">
+                    {PALETA_BANNERS.map(color => (
+                      <button
+                        key={color.id}
+                        type="button"
+                        className={`color-swatch ${colorNuevoGrupo === color.id ? "selected" : ""}`}
+                        style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                        onClick={() => setColorNuevoGrupo(color.id)}
+                        aria-label={`Color ${color.id}`}
+                      />
+                    ))}
+                  </div>
                   <button className="btn btnPrimary" onClick={manejarCrearGrupo}>
                     Crear y generar código
                   </button>
@@ -897,6 +1019,19 @@ export default function Home() {
                     onChange={e => setTituloRepoPublico(e.target.value)}
                     placeholder="Ej: Apuntes de Álgebra Lineal"
                   />
+                  <label className="label">Color del repositorio</label>
+                  <div className="color-picker-row">
+                    {PALETA_BANNERS.map(color => (
+                      <button
+                        key={color.id}
+                        type="button"
+                        className={`color-swatch ${colorNuevoRepo === color.id ? "selected" : ""}`}
+                        style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                        onClick={() => setColorNuevoRepo(color.id)}
+                        aria-label={`Color ${color.id}`}
+                      />
+                    ))}
+                  </div>
                   <div className="label">Creador: {nombreUsuario || "Usuario"}</div>
                   <button className="btn btnPrimary" onClick={manejarCrearRepoPublico}>
                     Crear repositorio público
@@ -944,6 +1079,8 @@ export default function Home() {
               </button>
             </div>
             <div className="modal-body">
+              {error && <div className="alert" style={{ marginBottom: 12 }}>{error}</div>}
+
               <label className="label">Nombre del grupo</label>
               <input
                 className="input"
@@ -951,8 +1088,21 @@ export default function Home() {
                 onChange={e => setNuevoNombreGrupoEditar(e.target.value)}
                 placeholder="Nombre del grupo"
               />
+              <label className="label">Color del grupo</label>
+              <div className="color-picker-row">
+                {PALETA_BANNERS.map(color => (
+                  <button
+                    key={color.id}
+                    type="button"
+                    className={`color-swatch ${colorGrupoEditar === color.id ? "selected" : ""}`}
+                    style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                    onClick={() => setColorGrupoEditar(color.id)}
+                    aria-label={`Color ${color.id}`}
+                  />
+                ))}
+              </div>
               <button className="btn btnPrimary" onClick={manejarGuardarNombreGrupoHome}>
-                Guardar nombre
+                Guardar cambios
               </button>
             </div>
           </div>
@@ -1002,49 +1152,62 @@ export default function Home() {
                 </div>
               </details>
               <div className="repo-suggest-list" style={{ marginTop: 12 }}>
-                {reposSugeridos.map(repo => (
-                  <button
-                    key={`${repo.tipo}-${repo.id}`}
-                    className="repo-suggest-card"
-                    style={{
-                      "--drawer-a": obtenerColorGrupo(repo.codigo || repo.nombre || repo.titulo || "").a,
-                      "--drawer-b": obtenerColorGrupo(repo.codigo || repo.nombre || repo.titulo || "").b
-                    }}
-                    onClick={() => {
-                      setBusquedaAbierta(false);
-                      setBusquedaTexto("");
-                      if (repo.tipo === "grupo") {
-                        navigate(`/repos/${repo.codigo}`);
-                      } else {
-                        navigate(`/repos-publicos/${repo.id}`);
-                      }
-                    }}
-                  >
-                    <span className="repo-suggest-name">{repo.nombre || repo.titulo}</span>
-                    {repo.tipo === "grupo" ? (
-                      <>
-                        <small className="repo-suggest-meta">
-                          {repo.codigo} · Admin: {repo.adminNombre}
-                        </small>
-                        <small className="repo-suggest-meta">
-                          {repo.archivosCount} archivo(s)
-                        </small>
-                      </>
-                    ) : (
-                      <>
-                        <small className="repo-suggest-meta">Creador: {repo.creadorNombre}</small>
-                        <small className="repo-suggest-meta">
-                          Creado: {repo.createdAt ? new Date(repo.createdAt).toLocaleDateString() : "-"}
-                        </small>
-                        <small className="repo-suggest-meta">
-                          {repo.ratingTotal
-                            ? `Calificacion: ${Number(repo.ratingPromedio || 0).toFixed(1)}/5 (${repo.ratingTotal})`
-                            : "Sin calificaciones"}
-                        </small>
-                      </>
-                    )}
-                  </button>
-                ))}
+                {reposSugeridos.map(repo => {
+                  const color = obtenerColorEntidad({
+                    tipo: repo.tipo === "grupo" ? "grupo" : "repo_publico",
+                    entidadId: repo.id,
+                    identificador: repo.codigo || repo.nombre || repo.titulo || "",
+                    colorId: repo.color_id || ""
+                  });
+                  return (
+                    <button
+                      key={`${repo.tipo}-${repo.id}`}
+                      className="repo-suggest-card"
+                      style={{
+                        "--drawer-a": color.a,
+                        "--drawer-b": color.b
+                      }}
+                      onClick={() => {
+                        setBusquedaAbierta(false);
+                        setBusquedaTexto("");
+                        if (repo.tipo === "grupo") {
+                          navigate(`/repos/${repo.codigo}`);
+                        } else {
+                          navigate(`/repos-publicos/${repo.id}`);
+                        }
+                      }}
+                    >
+                      <span className="repo-suggest-name">{repo.nombre || repo.titulo}</span>
+                      {repo.tipo === "grupo" ? (
+                        <>
+                          <small className="repo-suggest-meta">
+                            {repo.codigo} · Admin: {repo.adminNombre}
+                          </small>
+                          <small className="repo-suggest-meta">
+                            {repo.archivosCount} archivo(s)
+                          </small>
+                          <small className="repo-suggest-meta">
+                            {repo.ratingTotal
+                              ? `Calificación: ${Number(repo.ratingPromedio || 0).toFixed(1)}/5 (${repo.ratingTotal})`
+                              : "Sin calificaciones"}
+                          </small>
+                        </>
+                      ) : (
+                        <>
+                          <small className="repo-suggest-meta">Creador: {repo.creadorNombre}</small>
+                          <small className="repo-suggest-meta">
+                            Creado: {repo.createdAt ? new Date(repo.createdAt).toLocaleDateString() : "-"}
+                          </small>
+                          <small className="repo-suggest-meta">
+                            {repo.ratingTotal
+                              ? `Calificacion: ${Number(repo.ratingPromedio || 0).toFixed(1)}/5 (${repo.ratingTotal})`
+                              : "Sin calificaciones"}
+                          </small>
+                        </>
+                      )}
+                    </button>
+                  );
+                })}
                 {buscandoRepos && <div className="label">Buscando...</div>}
                 {!buscandoRepos && (busquedaTexto.trim() || filtroFechaRepos !== "all" || filtroRatingRepos !== "all") && reposSugeridos.length === 0 && (
                   <div className="label">Sin resultados</div>
@@ -1058,7 +1221,7 @@ export default function Home() {
         </div>
       )}
 
-      {error && <div className="alert">{error}</div>}
+      {error && !accionAbierta && !grupoEditando && <div className="alert">{error}</div>}
     </div>
   );
 }

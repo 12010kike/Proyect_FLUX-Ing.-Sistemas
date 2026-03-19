@@ -1,4 +1,5 @@
 import { supabase } from "../config/supabaseClient";
+import { validarNombreSinMalasPalabras } from "../utils/nameModeration";
 
 function normalizarTexto(valor = "") {
   return `${valor}`
@@ -38,6 +39,7 @@ function mapearGrupo(grupo, miembros, actividad) {
     id: grupo.id,
     nombre: grupo.nombre,
     codigo: grupo.codigo,
+    color_id: grupo.color_id || "",
     creadorId: grupo.creador_id,
     esPublico: Boolean(grupo.es_publico),
     miembros: (miembros || []).map(m => ({
@@ -65,7 +67,7 @@ export async function listarGruposDelUsuario() {
 
   const { data, error } = await supabase
     .from("grupo_miembros")
-    .select("grupo_id, is_admin, grupos ( id, nombre, codigo, creador_id, created_at )")
+    .select("grupo_id, is_admin, grupos ( id, nombre, codigo, color_id, creador_id, created_at )")
     .eq("user_id", user.id)
     .order("joined_at", { ascending: false });
   if (error) throw error;
@@ -79,7 +81,7 @@ export async function listarGruposDelUsuario() {
     .filter(Boolean);
 }
 
-export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false }) {
+export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false, colorId = "" }) {
   const {
     data: { session },
     error: sessionError
@@ -89,7 +91,7 @@ export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false
   if (!user) throw new Error("No hay sesion activa.");
 
   const codigo = await generarCodigoUnico();
-  const nombre = nombreGrupo.trim();
+  const nombre = validarNombreSinMalasPalabras(nombreGrupo, "El nombre del grupo");
   const displayName = nombreUsuario.trim();
 
   const { data: grupo, error: errorGrupo } = await supabase
@@ -97,6 +99,7 @@ export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false
     .insert({
       nombre,
       codigo,
+      color_id: colorId || null,
       creador_id: user.id,
       es_publico: esPublico
     })
@@ -236,7 +239,7 @@ export async function actualizarNombreGrupo({
   actorNombre = "",
   nombreAnterior = ""
 }) {
-  const nuevoNombre = nombre.trim();
+  const nuevoNombre = validarNombreSinMalasPalabras(nombre, "El nombre del grupo");
   const { error } = await supabase
     .from("grupos")
     .update({ nombre: nuevoNombre })
@@ -255,6 +258,52 @@ export async function actualizarNombreGrupo({
       });
     if (actividadError) {
       console.warn("No se pudo registrar actividad de renombre:", actividadError.message);
+    }
+  }
+}
+
+export async function actualizarColorGrupo({
+  grupoId,
+  colorId,
+  actorId = null,
+  actorNombre = ""
+}) {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  const { data: grupo, error: grupoError } = await supabase
+    .from("grupos")
+    .select("id, creador_id")
+    .eq("id", grupoId)
+    .maybeSingle();
+  if (grupoError) throw grupoError;
+  if (!grupo) throw new Error("Grupo no encontrado.");
+  if (grupo.creador_id !== user.id) {
+    throw new Error("Solo el creador puede cambiar el color del grupo.");
+  }
+
+  const { error } = await supabase
+    .from("grupos")
+    .update({ color_id: colorId || null })
+    .eq("id", grupoId);
+  if (error) throw error;
+
+  if (actorId) {
+    const mensaje = `COLOR::${actorNombre || "Usuario"} cambió el color del grupo.`;
+    const { error: actividadError } = await supabase
+      .from("grupo_actividad")
+      .insert({
+        grupo_id: grupoId,
+        actor_id: actorId,
+        mensaje
+      });
+    if (actividadError) {
+      console.warn("No se pudo registrar actividad de color:", actividadError.message);
     }
   }
 }
@@ -287,7 +336,7 @@ export async function obtenerRepositorioParaLecturaPorCodigo(codigo) {
   const codigoNormalizado = codigo.trim().toUpperCase();
   const { data: grupo, error: errorGrupo } = await supabase
     .from("grupos")
-    .select("id, nombre, codigo, creador_id, es_publico")
+    .select("id, nombre, codigo, color_id, creador_id, es_publico")
     .eq("codigo", codigoNormalizado)
     .maybeSingle();
   if (errorGrupo) throw errorGrupo;
@@ -381,7 +430,25 @@ export async function abandonarGrupo({ grupoId }) {
   if (sessionError) throw sessionError;
   const user = session?.user;
   if (!user) throw new Error("No hay sesion activa.");
+  // Leer datos del grupo y del miembro que abandona
+  const { data: grupo, error: grupoError } = await supabase
+    .from("grupos")
+    .select("id, creador_id")
+    .eq("id", grupoId)
+    .maybeSingle();
+  if (grupoError) throw grupoError;
 
+  const { data: miembro, error: miembroError } = await supabase
+    .from("grupo_miembros")
+    .select("id, user_id, is_admin, joined_at, display_name")
+    .eq("grupo_id", grupoId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (miembroError) throw miembroError;
+
+  const wasAdmin = Boolean(miembro?.is_admin);
+
+  // Eliminar la membresía del usuario
   const { error: deleteError } = await supabase
     .from("grupo_miembros")
     .delete()
@@ -389,18 +456,87 @@ export async function abandonarGrupo({ grupoId }) {
     .eq("user_id", user.id);
   if (deleteError) throw deleteError;
 
+  // Registrar actividad: el usuario abandonó el grupo
+  try {
+    const nombreSalida = miembro?.display_name || user.user_metadata?.display_name || "Usuario";
+    await supabase.from("grupo_actividad").insert({
+      grupo_id: grupoId,
+      actor_id: user.id,
+      mensaje: `SALIDA::${nombreSalida} abandonó el grupo.`
+    });
+  } catch (actErr) {
+    // No crítico: sólo registrar en consola
+    console.warn("No se pudo registrar actividad de salida:", actErr?.message || actErr);
+  }
+
+  // Contar miembros restantes
   const { count, error: countError } = await supabase
     .from("grupo_miembros")
     .select("id", { count: "exact", head: true })
     .eq("grupo_id", grupoId);
   if (countError) throw countError;
 
+  // Si no quedan miembros, eliminar el grupo
   if (!count || count === 0) {
     const { error: deleteGroupError } = await supabase
       .from("grupos")
       .delete()
       .eq("id", grupoId);
     if (deleteGroupError) throw deleteGroupError;
+    return;
+  }
+
+  // Si el usuario que se fue era admin, asegurarse que exista al menos un admin
+  if (wasAdmin) {
+    const { data: otrosAdmins, error: adminsError } = await supabase
+      .from("grupo_miembros")
+      .select("id, user_id")
+      .eq("grupo_id", grupoId)
+      .eq("is_admin", true)
+      .limit(1);
+    if (adminsError) throw adminsError;
+
+    // Si ya hay otro admin, no hacemos nada
+    if (!otrosAdmins || otrosAdmins.length === 0) {
+      // Promover al miembro con fecha de ingreso más antigua
+      const { data: candidato, error: candidatoError } = await supabase
+        .from("grupo_miembros")
+        .select("id, user_id, display_name")
+        .eq("grupo_id", grupoId)
+        .order("joined_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (candidatoError) throw candidatoError;
+
+      if (candidato && candidato.user_id) {
+        const { error: promoteError } = await supabase
+          .from("grupo_miembros")
+          .update({ is_admin: true })
+          .eq("id", candidato.id);
+        if (promoteError) throw promoteError;
+
+        // Registrar actividad: promoción de miembro a admin
+        try {
+          const nombrePromovido = candidato?.display_name || "Usuario";
+          await supabase.from("grupo_actividad").insert({
+            grupo_id: grupoId,
+            actor_id: user.id,
+            mensaje: `PROMOCION::${nombrePromovido} fue promovido a administrador.`
+          });
+        } catch (actErr) {
+          console.warn("No se pudo registrar actividad de promoción:", actErr?.message || actErr);
+        }
+
+        // Si el creador del grupo era quien se fue, transferir creador_id
+        if (grupo && grupo.creador_id === user.id) {
+          const { error: updateCreatorError } = await supabase
+            .from("grupos")
+            .update({ creador_id: candidato.user_id })
+            .eq("id", grupoId);
+          if (updateCreatorError) throw updateCreatorError;
+        }
+      }
+    }
   }
 }
 
@@ -422,7 +558,10 @@ export async function buscarRepositoriosPublicos(
   const ahora = new Date();
 
   let desde = null;
-  if (filtroFecha === "1m") {
+  if (filtroFecha === "1w") {
+    desde = new Date(ahora);
+    desde.setDate(desde.getDate() - 7);
+  } else if (filtroFecha === "1m") {
     desde = new Date(ahora);
     desde.setMonth(desde.getMonth() - 1);
   } else if (filtroFecha === "3m") {
@@ -445,14 +584,14 @@ export async function buscarRepositoriosPublicos(
 
   let queryGrupos = supabase
     .from("grupos")
-    .select("id, nombre, codigo, creador_id, es_publico, created_at")
+    .select("id, nombre, codigo, color_id, creador_id, es_publico, created_at")
     .eq("es_publico", true)
     .limit(250);
   if (desde) queryGrupos = queryGrupos.gte("created_at", desde.toISOString());
 
   let queryReposPublicos = supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .limit(250);
   if (desde) queryReposPublicos = queryReposPublicos.gte("created_at", desde.toISOString());
 
@@ -461,6 +600,7 @@ export async function buscarRepositoriosPublicos(
   let admins = [];
   let archivos = [];
   let ratings = [];
+  let ratingsGrupos = [];
 
   if (esGuest) {
     const [
@@ -504,15 +644,26 @@ export async function buscarRepositoriosPublicos(
     archivos = archivosData || [];
   }
 
-  const reposPublicosIds = (reposPublicos || []).map(r => r.id).filter(Boolean);
-  if (reposPublicosIds.length) {
+  const idsRatingReposPublicos = (reposPublicos || []).map(r => r.id).filter(Boolean);
+  if (idsRatingReposPublicos.length) {
     const { data: ratingsData, error: ratingsError } = await supabase
       .from("ratings")
       .select("repo_id, rating")
-      .in("repo_id", reposPublicosIds)
+      .in("repo_id", idsRatingReposPublicos)
       .limit(5000);
     if (ratingsError) throw ratingsError;
     ratings = ratingsData || [];
+  }
+
+  const idsGruposPublicos = (grupos || []).map(g => g.id).filter(Boolean);
+  if (idsGruposPublicos.length) {
+    const { data: ratingsGruposData, error: ratingsGruposError } = await supabase
+      .from("ratings_grupos")
+      .select("grupo_id, user_id, rating")
+      .in("grupo_id", idsGruposPublicos)
+      .limit(5000);
+    if (ratingsGruposError) throw ratingsGruposError;
+    ratingsGrupos = ratingsGruposData || [];
   }
 
   const adminPorGrupo = new Map((admins || []).map(a => [a.grupo_id, a.display_name]));
@@ -521,12 +672,16 @@ export async function buscarRepositoriosPublicos(
     countArchivosPorGrupo.set(a.grupo_id, (countArchivosPorGrupo.get(a.grupo_id) || 0) + 1);
   }
 
+  const ratingGrupoPorId = obtenerPromediosRatingGrupos(ratingsGrupos);
+
   const resultadosGrupos = (grupos || [])
     .map(g => ({
+      ...(ratingGrupoPorId.get(g.id) || { ratingPromedio: 0, ratingTotal: 0 }),
       tipo: "grupo",
       id: g.id,
       nombre: g.nombre,
       codigo: g.codigo,
+      color_id: g.color_id || "",
       adminNombre: adminPorGrupo.get(g.id) || "Admin",
       archivosCount: countArchivosPorGrupo.get(g.id) || 0,
       createdAt: g.created_at || null
@@ -538,6 +693,7 @@ export async function buscarRepositoriosPublicos(
       const textoNormalizado = `${nombreNorm} ${adminNorm} ${codigoNorm}`.trim();
       const textoSinEspacios = textoNormalizado.replace(/\s/g, "");
       const termSinEspacios = termNorm.replace(/\s/g, "");
+      if (minRating && (Number(g.ratingPromedio) || 0) < minRating) return false;
 
       if (!termTokens.length) return true;
       return (
@@ -554,6 +710,7 @@ export async function buscarRepositoriosPublicos(
       titulo: r.titulo,
       creadorId: r.creador_id,
       creadorNombre: r.creador_nombre || "Usuario",
+      color_id: r.color_id || "",
       createdAt: r.created_at || null
     }))
     .filter(r => {
@@ -591,7 +748,30 @@ function obtenerPromedioRating({ ratings, repositorioId }) {
   return { ratingPromedio: suma / total, ratingTotal: total };
 }
 
-export async function crearRepositorioPublico({ titulo, creadorNombre = "" }) {
+function obtenerPromediosRatingGrupos(rows = []) {
+  const acumuladoPorGrupo = new Map();
+  for (const row of rows || []) {
+    const grupoId = row?.grupo_id;
+    const valor = Number(row?.rating);
+    if (!grupoId) continue;
+    if (!Number.isFinite(valor)) continue;
+    const actual = acumuladoPorGrupo.get(grupoId) || { suma: 0, total: 0 };
+    actual.suma += valor;
+    actual.total += 1;
+    acumuladoPorGrupo.set(grupoId, actual);
+  }
+
+  const resultado = new Map();
+  for (const [grupoId, stats] of acumuladoPorGrupo.entries()) {
+    resultado.set(grupoId, {
+      ratingPromedio: stats.total ? stats.suma / stats.total : 0,
+      ratingTotal: stats.total || 0
+    });
+  }
+  return resultado;
+}
+
+export async function crearRepositorioPublico({ titulo, creadorNombre = "", colorId = "" }) {
   const {
     data: { session },
     error: sessionError
@@ -601,17 +781,17 @@ export async function crearRepositorioPublico({ titulo, creadorNombre = "" }) {
   if (!user) throw new Error("No hay sesion activa.");
 
   const nombre = `${creadorNombre || user.user_metadata?.display_name || "Usuario"}`.trim();
-  const tituloLimpio = `${titulo || ""}`.trim();
-  if (!tituloLimpio) throw new Error("El titulo es obligatorio.");
+  const tituloLimpio = validarNombreSinMalasPalabras(titulo, "El titulo del repositorio");
 
   const { data, error } = await supabase
     .from("repositorios_publicos")
     .insert({
       titulo: tituloLimpio,
       creador_id: user.id,
-      creador_nombre: nombre
+      creador_nombre: nombre,
+      color_id: colorId || null
     })
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .single();
   if (error) throw error;
   return data;
@@ -622,7 +802,7 @@ export async function obtenerRepositorioPublicoPorId(id) {
   if (!repoId) return null;
   const { data, error } = await supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .eq("id", repoId)
     .maybeSingle();
   if (error) throw error;
@@ -669,10 +849,11 @@ export async function obtenerPromedioRepositorioPublico({ repositorioId }) {
 
 export async function guardarCalificacionRepositorioPublico({ repositorioId, rating }) {
   const repoId = `${repositorioId || ""}`.trim();
-  const valor = Number(rating);
+  const valorCrudo = Number(rating);
+  const valor = Math.round(valorCrudo * 2) / 2;
   if (!repoId) throw new Error("Repositorio invalido.");
-  if (!Number.isFinite(valor) || valor < 1 || valor > 5) {
-    throw new Error("La calificacion debe estar entre 1 y 5.");
+  if (!Number.isFinite(valorCrudo) || valor < 0 || valor > 5) {
+    throw new Error("La calificacion debe estar entre 0 y 5.");
   }
 
   const {
@@ -683,13 +864,120 @@ export async function guardarCalificacionRepositorioPublico({ repositorioId, rat
   const user = session?.user;
   if (!user) throw new Error("No hay sesion activa.");
 
-  const { error } = await supabase
+  const { data: existente, error: errorExistente } = await supabase
     .from("ratings")
-    .upsert(
-      { repo_id: repoId, user_id: user.id, rating: valor },
-      { onConflict: "repo_id,user_id" }
-    );
+    .select("id")
+    .eq("repo_id", repoId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (errorExistente) throw errorExistente;
+
+  if (existente?.id) {
+    const { error: updateError } = await supabase
+      .from("ratings")
+      .update({ rating: valor })
+      .eq("id", existente.id);
+    if (updateError) throw updateError;
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("ratings")
+    .insert({ repo_id: repoId, user_id: user.id, rating: valor });
+  if (insertError) throw insertError;
+}
+
+export async function obtenerMiCalificacionGrupoPublico({ grupoId }) {
+  const id = `${grupoId || ""}`.trim();
+  if (!id) return null;
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) return null;
+
+  const { data, error } = await supabase
+    .from("ratings_grupos")
+    .select("rating")
+    .eq("grupo_id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
   if (error) throw error;
+  return data?.rating ?? null;
+}
+
+export async function obtenerPromedioGrupoPublico({ grupoId }) {
+  const id = `${grupoId || ""}`.trim();
+  if (!id) return { ratingPromedio: 0, ratingTotal: 0 };
+
+  const { data, error } = await supabase
+    .from("ratings_grupos")
+    .select("rating", { count: "exact" })
+    .eq("grupo_id", id)
+    .limit(5000);
+  if (error) throw error;
+
+  const lista = data || [];
+  if (!lista.length) return { ratingPromedio: 0, ratingTotal: 0 };
+  const suma = lista.reduce((acc, r) => acc + (Number(r.rating) || 0), 0);
+  return { ratingPromedio: suma / lista.length, ratingTotal: lista.length };
+}
+
+export async function guardarCalificacionGrupoPublico({ grupoId, rating }) {
+  const id = `${grupoId || ""}`.trim();
+  const valorCrudo = Number(rating);
+  const valor = Math.round(valorCrudo * 2) / 2;
+
+  if (!id) throw new Error("Repositorio invalido.");
+  if (!Number.isFinite(valorCrudo) || valor < 0 || valor > 5) {
+    throw new Error("La calificacion debe estar entre 0 y 5.");
+  }
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  const { data: grupo, error: grupoError } = await supabase
+    .from("grupos")
+    .select("id, es_publico")
+    .eq("id", id)
+    .maybeSingle();
+  if (grupoError) throw grupoError;
+  if (!grupo) throw new Error("Repositorio no encontrado.");
+  if (!grupo.es_publico) throw new Error("Solo se puede calificar repositorios públicos.");
+
+  const { data: existente, error: existenteError } = await supabase
+    .from("ratings_grupos")
+    .select("id")
+    .eq("grupo_id", id)
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (existenteError) throw existenteError;
+
+  if (existente?.id) {
+    const { error: updateError } = await supabase
+      .from("ratings_grupos")
+      .update({ rating: valor })
+      .eq("id", existente.id);
+    if (updateError) throw updateError;
+    return;
+  }
+
+  const { error: insertError } = await supabase
+    .from("ratings_grupos")
+    .insert({
+      grupo_id: id,
+      user_id: user.id,
+      rating: valor
+    });
+  if (insertError) throw insertError;
 }
 
 async function asegurarPropietarioRepositorioPublico({ repositorioId, userId }) {
@@ -704,6 +992,30 @@ async function asegurarPropietarioRepositorioPublico({ repositorioId, userId }) 
     throw new Error("Solo el creador puede modificar este repositorio.");
   }
   return repo;
+}
+
+export async function actualizarColorRepositorioPublico({ repositorioId, colorId }) {
+  const repoId = `${repositorioId || ""}`.trim();
+  if (!repoId) throw new Error("Repositorio inválido.");
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
+
+  const { data, error } = await supabase
+    .from("repositorios_publicos")
+    .update({ color_id: colorId || null })
+    .eq("id", repoId)
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
+    .single();
+  if (error) throw error;
+  return data;
 }
 
 async function esColaboradorRepositorioPublico({ repositorioId, userId }) {
@@ -744,6 +1056,18 @@ export async function listarArchivosRepositorioPublico({ repositorioId }) {
 
 export async function subirArchivoRepositorioPublico({ repositorioId, archivo }) {
   if (!archivo) throw new Error("Selecciona un archivo.");
+  const tiposPermitidos = [
+    "application/pdf",
+    "image/png",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+  ];
+  const sizeMaximo = 20 * 1024 * 1024;
+  if (!tiposPermitidos.includes(archivo.type || "")) {
+    throw new Error("Tipo de archivo no permitido. Solo PDF, DOCX o PNG.");
+  }
+  if ((archivo.size || 0) > sizeMaximo) {
+    throw new Error("El archivo supera el límite de 20MB.");
+  }
 
   const {
     data: { session },
@@ -968,7 +1292,7 @@ export async function listarRepositoriosFavoritos() {
 
   const { data, error } = await supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .in("id", ids)
     .order("created_at", { ascending: false });
   if (error) throw error;
@@ -1039,11 +1363,66 @@ export async function listarRepositoriosCreados() {
 
   const { data, error } = await supabase
     .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, created_at")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
     .eq("creador_id", userId)
     .order("created_at", { ascending: false });
   if (error) throw error;
   return data || [];
+}
+
+function obtenerFechaDesdeFiltro(fechaFiltro = "all") {
+  const ahora = new Date();
+  const desde = new Date(ahora);
+
+  if (fechaFiltro === "1w") {
+    desde.setDate(desde.getDate() - 7);
+    return desde.toISOString();
+  }
+  if (fechaFiltro === "1m") {
+    desde.setMonth(desde.getMonth() - 1);
+    return desde.toISOString();
+  }
+  if (fechaFiltro === "3m") {
+    desde.setMonth(desde.getMonth() - 3);
+    return desde.toISOString();
+  }
+  if (fechaFiltro === "1y") {
+    desde.setFullYear(desde.getFullYear() - 1);
+    return desde.toISOString();
+  }
+
+  return null;
+}
+
+export async function obtenerTotalesAdminHome({ fechaFiltro = "all" } = {}) {
+  const fechaDesde = obtenerFechaDesdeFiltro(fechaFiltro);
+  let gruposBuilder = supabase.from("grupos").select("id", { count: "exact", head: true });
+  let reposBuilder = supabase
+    .from("repositorios_publicos")
+    .select("id", { count: "exact", head: true });
+  let usuariosBuilder = supabase.from("profiles").select("id", { count: "exact", head: true });
+
+  if (fechaDesde) {
+    gruposBuilder = gruposBuilder.gte("created_at", fechaDesde);
+    reposBuilder = reposBuilder.gte("created_at", fechaDesde);
+    usuariosBuilder = usuariosBuilder.gte("created_at", fechaDesde);
+  }
+
+  const [gruposQuery, reposQuery, usuariosQuery] = await Promise.all([
+    gruposBuilder,
+    reposBuilder,
+    usuariosBuilder
+  ]);
+
+  if (gruposQuery.error) throw gruposQuery.error;
+  if (reposQuery.error) throw reposQuery.error;
+  if (usuariosQuery.error) throw usuariosQuery.error;
+
+  return {
+    totalGrupos: Number(gruposQuery.count || 0),
+    totalRepositorios: Number(reposQuery.count || 0),
+    totalUsuarios: Number(usuariosQuery.count || 0)
+  };
 }
 
 export async function listarArchivosGrupoPorId({ grupoId }) {
@@ -1223,5 +1602,87 @@ export async function eliminarTareaGrupo({ tareaId }) {
     .from("grupo_tareas")
     .delete()
     .eq("id", tareaId);
+  if (error) throw error;
+}
+
+// -----------------------------
+// Historial de chat con IA
+// -----------------------------
+
+const CHAT_TAG_REGEX = /^\[\[CHAT:([a-zA-Z0-9_-]+)\]\]\s*/;
+
+function adjuntarTagChat(mensaje, chatId) {
+  if (!chatId) return mensaje;
+  return `[[CHAT:${chatId}]] ${mensaje}`;
+}
+
+function extraerChatId(mensaje = "") {
+  const match = `${mensaje}`.match(CHAT_TAG_REGEX);
+  return match?.[1] || null;
+}
+
+function limpiarTagChat(mensaje = "") {
+  return `${mensaje}`.replace(CHAT_TAG_REGEX, "");
+}
+
+export async function guardarMensajeChat({ mensajeUsuario, respuestaIA, chatId = null }) {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const userId = session?.user?.id;
+  if (!userId) throw new Error("No hay sesión activa.");
+
+  const { error } = await supabase.from("ia_chats").insert({
+    user_id: userId,
+    mensaje_usuario: adjuntarTagChat(mensajeUsuario, chatId),
+    respuesta_ia: respuestaIA
+  });
+  if (error) throw error;
+}
+
+export async function listarHistorialChat() {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const userId = session?.user?.id;
+  if (!userId) return [];
+
+  const { data, error } = await supabase
+    .from("ia_chats")
+    .select("id, mensaje_usuario, respuesta_ia, created_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data || []).map(item => ({
+    ...item,
+    chat_id: extraerChatId(item.mensaje_usuario) || "legacy",
+    mensaje_usuario: limpiarTagChat(item.mensaje_usuario)
+  }));
+}
+
+export async function eliminarHistorialChatPorId(chatId) {
+  if (!chatId) throw new Error("Chat inválido.");
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const userId = session?.user?.id;
+  if (!userId) throw new Error("No hay sesión activa.");
+
+  let query = supabase.from("ia_chats").delete().eq("user_id", userId);
+  if (chatId === "legacy") {
+    query = query.not("mensaje_usuario", "like", "[[CHAT:%");
+  } else {
+    query = query.like("mensaje_usuario", `[[CHAT:${chatId}]]%`);
+  }
+
+  const { error } = await query;
   if (error) throw error;
 }

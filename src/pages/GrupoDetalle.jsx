@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   actualizarVisibilidadGrupo,
   actualizarNombreGrupo,
+  actualizarColorGrupo,
   abandonarGrupo,
   eliminarArchivoGrupo,
   eliminarGrupo,
@@ -14,7 +15,7 @@ import {
   marcarMensajesLeidos
 } from "../servicios/grupos.api";
 import { supabase } from "../config/supabaseClient";
-import { obtenerColorGrupo } from "../utils/groupColors";
+import { PALETA_BANNERS, obtenerColorEntidad } from "../utils/groupColors";
 import "../estilos/flux.css";
 import TaskMaster from "./TaskMaster";
 import {
@@ -22,8 +23,10 @@ import {
   crearTareaGrupo,
   toggleTareaGrupo,
   editarTareaGrupo,
-  eliminarTareaGrupo
+  eliminarTareaGrupo,
+  listarArchivosGrupoPorId
 } from "../servicios/grupos.api";
+import { generarResumenRepositorio } from "../servicios/ia.api";
 
 export default function GrupoDetalle() {
   const { codigo } = useParams();
@@ -42,6 +45,8 @@ export default function GrupoDetalle() {
   const [nuevoNombreGrupo, setNuevoNombreGrupo] = useState("");
   const [nuevoAnuncio, setNuevoAnuncio] = useState("");
   const [guardandoVisibilidad, setGuardandoVisibilidad] = useState(false);
+  const [guardandoColorGrupo, setGuardandoColorGrupo] = useState(false);
+  const [colorGrupoSeleccionado, setColorGrupoSeleccionado] = useState(PALETA_BANNERS[0].id);
   const [error, setError] = useState("");
 
   const [archivosSeleccionados, setArchivosSeleccionados] = useState([]);
@@ -74,6 +79,18 @@ export default function GrupoDetalle() {
   const [horarioMiembro, setHorarioMiembro] = useState([]);
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
   const [errorPerfil, setErrorPerfil] = useState("");
+  // Preview states for archivos
+  const [mostrarPreview, setMostrarPreview] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState("");
+  const [previewType, setPreviewType] = useState(""); // 'pdf' | 'image'
+  const [previewNombre, setPreviewNombre] = useState("");
+
+  // ── IA tab ──────────────────────────────────────────────
+  const [iaArchivos, setIaArchivos] = useState([]);
+  const [iaCargandoArchivos, setIaCargandoArchivos] = useState(false);
+  const [iaGenerando, setIaGenerando] = useState(false);
+  const [iaResumen, setIaResumen] = useState("");
+  const [iaError, setIaError] = useState("");
 
   const DIAS = [
     { value: 1, label: "Lun" },
@@ -183,6 +200,7 @@ export default function GrupoDetalle() {
           msg.startsWith("ARCHIVO::") ||
           msg.startsWith("RENOMBRE::") ||
           msg.startsWith("VISIBILIDAD::") ||
+          msg.startsWith("COLOR::") ||
           msg.includes("se ha unido") ||
           msg.includes("creo el grupo") ||
           msg.includes("creó el grupo")
@@ -225,6 +243,15 @@ export default function GrupoDetalle() {
             autor: autorPorId || "Sistema",
             fecha: a.fecha,
             texto: msg.replace("VISIBILIDAD::", "")
+          };
+        }
+
+        if (msg.startsWith("COLOR::")) {
+          return {
+            tipo: "color",
+            autor: autorPorId || "Sistema",
+            fecha: a.fecha,
+            texto: msg.replace("COLOR::", "")
           };
         }
 
@@ -405,6 +432,7 @@ export default function GrupoDetalle() {
     }
     setGrupo(g);
     setNuevoNombreGrupo(g?.nombre || "");
+    setColorGrupoSeleccionado(g?.color_id || PALETA_BANNERS[0].id);
     const miembro = g?.miembros?.find(m => m.user_id === userId);
     setEsAdmin(Boolean(miembro?.is_admin));
     return g || null;
@@ -418,7 +446,7 @@ export default function GrupoDetalle() {
       }
       const { data, error: listError } = await supabase
         .from("grupo_archivos")
-        .select("path, nombre, created_at")
+        .select("path, nombre, created_at, uploader_id")
         .eq("grupo_id", grupoId)
         .order("created_at", { ascending: false });
       if (listError) throw listError;
@@ -525,6 +553,50 @@ export default function GrupoDetalle() {
     };
   }, [tabActiva, grupo?.id, userId]);
 
+  useEffect(() => {
+    if (tabActiva !== "ia" || !grupo?.id) return;
+    const cargar = async () => {
+      setIaCargandoArchivos(true);
+      setIaError("");
+      try {
+        const data = await listarArchivosGrupoPorId({ grupoId: grupo.id });
+        setIaArchivos(data);
+      } catch (e) {
+        setIaError("No se pudieron cargar los archivos: " + e.message);
+      } finally {
+        setIaCargandoArchivos(false);
+      }
+    };
+    cargar();
+  }, [tabActiva, grupo?.id]);
+
+  async function manejarGenerarResumenGrupo() {
+    setIaError("");
+    setIaResumen("");
+    setIaGenerando(true);
+    try {
+      const resumen = await generarResumenRepositorio({
+        nombreRepo: grupo.nombre,
+        archivos: iaArchivos
+      });
+      setIaResumen(resumen);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        await supabase.from("ia_resumenes").insert({
+          user_id: session.user.id,
+          repositorio_tipo: "grupo",
+          repositorio_id: grupo.id,
+          resumen
+        });
+      }
+    } catch (e) {
+      setIaError(e.message);
+    } finally {
+      setIaGenerando(false);
+    }
+  }
+
   const manejarArchivos = files => {
     const archivosValidos = Array.from(files).filter(file => {
       const tipos = [
@@ -623,6 +695,21 @@ export default function GrupoDetalle() {
     await listarArchivos();
   }
 
+  function abrirPreview(url, extension, nombre) {
+    console.log("abrirPreview grupo", { url, extension, nombre });
+    setPreviewUrl(url);
+    setPreviewType(extension === "pdf" ? "pdf" : "image");
+    setPreviewNombre(nombre || "");
+    setMostrarPreview(true);
+  }
+
+  function cerrarPreview() {
+    setMostrarPreview(false);
+    setPreviewUrl("");
+    setPreviewType("");
+    setPreviewNombre("");
+  }
+
   async function publicarAnuncio() {
     setError("");
     if (!grupo?.id) return;
@@ -653,15 +740,20 @@ export default function GrupoDetalle() {
   async function manejarGuardarNombre() {
     if (!grupo) return;
     if (!nuevoNombreGrupo.trim()) return;
-    await actualizarNombreGrupo({
-      grupoId: grupo.id,
-      nombre: nuevoNombreGrupo,
-      actorId: userId,
-      actorNombre: displayName,
-      nombreAnterior: grupo.nombre
-    });
-    setGrupo(prev => ({ ...prev, nombre: nuevoNombreGrupo.trim() }));
-    await recargarGrupo();
+    setError("");
+    try {
+      await actualizarNombreGrupo({
+        grupoId: grupo.id,
+        nombre: nuevoNombreGrupo,
+        actorId: userId,
+        actorNombre: displayName,
+        nombreAnterior: grupo.nombre
+      });
+      setGrupo(prev => ({ ...prev, nombre: nuevoNombreGrupo.trim() }));
+      await recargarGrupo();
+    } catch (e) {
+      setError(e.message);
+    }
   }
 
   async function manejarCambiarVisibilidad(esPublico) {
@@ -683,6 +775,26 @@ export default function GrupoDetalle() {
     }
   }
 
+  async function manejarGuardarColorGrupo() {
+    if (!grupo?.id) return;
+    if (!puedePublicarAnuncio) return;
+    setError("");
+    setGuardandoColorGrupo(true);
+    try {
+      await actualizarColorGrupo({
+        grupoId: grupo.id,
+        colorId: colorGrupoSeleccionado,
+        actorId: userId,
+        actorNombre: displayName
+      });
+      await recargarGrupo();
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setGuardandoColorGrupo(false);
+    }
+  }
+
   async function manejarExpulsar(miembroId) {
     if (!grupo) return;
     await expulsarMiembro({ grupoId: grupo.id, miembroId });
@@ -699,7 +811,11 @@ export default function GrupoDetalle() {
 
   async function manejarAbandonarGrupo() {
     if (!grupo) return;
-    const ok = window.confirm("Abandonar este grupo? Si eres el último miembro, se eliminará.");
+    let mensaje = "Abandonar este grupo? Si eres el último miembro, se eliminará.";
+    if (esAdmin && (grupo?.miembros?.length || 0) > 1) {
+      mensaje = "Eres administrador. Si sales, se asignará automáticamente otro miembro como administrador. ¿Continuar?";
+    }
+    const ok = window.confirm(mensaje);
     if (!ok) return;
     await abandonarGrupo({ grupoId: grupo.id });
     navigate("/grupos");
@@ -862,7 +978,12 @@ export default function GrupoDetalle() {
     );
   }
 
-  const colorGrupo = obtenerColorGrupo(grupo.codigo || grupo.nombre || "");
+  const colorGrupo = obtenerColorEntidad({
+    tipo: "grupo",
+    entidadId: grupo.id,
+    identificador: grupo.codigo || grupo.nombre || grupo.id || "",
+    colorId: grupo.color_id || ""
+  });
   
   return (
     <div className="container">
@@ -921,6 +1042,7 @@ export default function GrupoDetalle() {
         <button className={`group-tab ${tabActiva === "archivos" ? "active" : ""}`} onClick={() => setTabActiva("archivos")}>Archivos</button>
         <button className={`group-tab ${tabActiva === "people" ? "active" : ""}`} onClick={() => setTabActiva("people")}>Personas</button>
         <button className={`group-tab ${tabActiva === "tareas" ? "active" : ""}`} onClick={() => setTabActiva("tareas")}>Tareas</button>
+        <button className={`group-tab ${tabActiva === "ia" ? "active" : ""}`} onClick={() => setTabActiva("ia")}>✨ IA</button>
       </div>
 
       {tabActiva === "stream" && (
@@ -940,6 +1062,34 @@ export default function GrupoDetalle() {
                 />
                 <span>Repositorio público</span>
               </label>
+            </div>
+          )}
+
+          {puedePublicarAnuncio && (
+            <div className="card">
+              <strong>Color del grupo</strong>
+              <div className="label" style={{ marginTop: 6 }}>
+                Selecciona uno de los 10 colores predefinidos.
+              </div>
+              <div className="color-picker-row" style={{ marginTop: 8 }}>
+                {PALETA_BANNERS.map(color => (
+                  <button
+                    key={color.id}
+                    type="button"
+                    className={`color-swatch ${colorGrupoSeleccionado === color.id ? "selected" : ""}`}
+                    style={{ background: `linear-gradient(135deg, ${color.a}, ${color.b})` }}
+                    onClick={() => setColorGrupoSeleccionado(color.id)}
+                    aria-label={`Color ${color.id}`}
+                  />
+                ))}
+              </div>
+              <button
+                className="btn btnPrimary"
+                onClick={manejarGuardarColorGrupo}
+                disabled={guardandoColorGrupo}
+              >
+                {guardandoColorGrupo ? "Guardando..." : "Guardar color"}
+              </button>
             </div>
           )}
 
@@ -998,7 +1148,7 @@ export default function GrupoDetalle() {
           ) : (
             <div className="card repo-card" style={{ maxWidth: "none" }}>
               <strong className="repo-title">Subir archivos</strong>
-              <p className="label repo-subtitle">PDF, DOCX, PNG (Máx. 20MB)</p>
+              <p className="label repo-subtitle"></p>
 
               <div className="drop-area" onClick={() => inputRef.current?.click()} onDrop={manejarDrop} onDragOver={manejarDragOver}>
                 <div className="drop-content">
@@ -1045,13 +1195,14 @@ export default function GrupoDetalle() {
             {archivosSubidos.map((file, idx) => {
               const fullPath = file.path;
               const { data } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(fullPath);
+              const pubUrl = data?.publicUrl || data?.publicURL || data?.publicurl || "";
               const nombre = file.nombre || fullPath?.split("/").pop() || "archivo";
               const extension = nombre.split(".").pop().toLowerCase();
               const icono = extension === "pdf" ? "📄" : extension === "docx" ? "📝" : extension === "png" ? "🖼️" : "📎";
 
               return (
                 <div key={idx} className="archivo-card">
-                  <a href={data.publicUrl} target="_blank" rel="noopener noreferrer" className="archivo-link">
+                  <a href={pubUrl} target="_blank" rel="noopener noreferrer" className="archivo-link">
                     <div className="archivo-icon">{icono}</div>
                     <div className="archivo-info">
                       <div className="archivo-nombre">{nombre}</div>
@@ -1060,16 +1211,72 @@ export default function GrupoDetalle() {
                       </div>
                     </div>
                   </a>
-                  {esAdmin && (
-                    <button className="btn" style={{ marginTop: 8 }} onClick={() => manejarEliminarArchivo(fullPath)}>
-                      Eliminar archivo
-                    </button>
-                  )}
+
+                  <div className="archivo-actions">
+                    {(esAdmin || file.uploader_id === userId) && (
+                      <button type="button" className="btn" onClick={() => manejarEliminarArchivo(fullPath)}>
+                        Eliminar archivo
+                      </button>
+                    )}
+
+                    {(extension === "pdf" || extension === "png") && (
+                      <button type="button" className="btn" onClick={() => abrirPreview(pubUrl, extension, nombre)}>
+                        Previsualizar
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
             {!archivosSubidos.length && <p className="no-archivos">No hay archivos subidos aún.</p>}
           </div>
+          {mostrarPreview && (
+            <div
+              className="preview-overlay"
+              style={{
+                position: "fixed",
+                inset: 0,
+                background: "rgba(0,0,0,0.6)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                zIndex: 1200,
+                padding: 20
+              }}
+              onClick={cerrarPreview}
+            >
+              <div
+                className="preview-content"
+                style={{
+                  background: "#fff",
+                  borderRadius: 8,
+                  maxWidth: "100%",
+                  width: "900px",
+                  maxHeight: "90%",
+                  overflow: "auto",
+                  position: "relative",
+                  padding: 12
+                }}
+                onClick={e => e.stopPropagation()}
+              >
+                <button
+                  onClick={cerrarPreview}
+                  style={{ position: "absolute", right: 8, top: 8 }}
+                  className="btn"
+                >
+                  Cerrar
+                </button>
+                <div style={{ marginTop: 32 }}>
+                  <strong style={{ display: "block", marginBottom: 8 }}>{previewNombre}</strong>
+                  {previewType === "pdf" ? (
+                    <iframe src={previewUrl} title={previewNombre} style={{ width: "100%", height: "70vh", border: "none" }} />
+                  ) : (
+                    <img src={previewUrl} alt={previewNombre} style={{ maxWidth: "100%", maxHeight: "70vh" }} />
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1219,12 +1426,72 @@ export default function GrupoDetalle() {
           <TaskMaster
           esAdmin={esAdmin}
           tareas={tareas}
-          totalMiembros={grupo?.miembros?.length || 0} 
+          totalMiembros={grupo?.miembros?.length || 0}
           onAgregarTarea={handleAgregarTarea}
           onToggleTarea={handleToggleTarea}
-          onEditarTarea={handleEditarTarea} 
+          onEditarTarea={handleEditarTarea}
           onBorrarTarea={handleBorrarTarea}
         />
+        </div>
+      )}
+
+      {tabActiva === "ia" && (
+        <div className="group-tab-content">
+          <div className="card">
+            <strong>Resumidor IA – {grupo.nombre}</strong>
+            <p className="label" style={{ marginTop: 6 }}>
+              Genera un resumen inteligente de los archivos de este grupo.
+            </p>
+
+            {iaCargandoArchivos && (
+              <p className="label" style={{ marginTop: 8 }}>Cargando archivos...</p>
+            )}
+
+            {!iaCargandoArchivos && (
+              <div style={{ marginTop: 10 }}>
+                <p className="label">
+                  <strong>Archivos ({iaArchivos.length})</strong>
+                </p>
+                {iaArchivos.length === 0 ? (
+                  <p className="label">Este grupo no tiene archivos aún.</p>
+                ) : (
+                  <ul className="ia-lista" style={{ marginTop: 6 }}>
+                    {iaArchivos.map((a, i) => (
+                      <li key={a.id || i} className="ia-lista-item">
+                        <span className="ia-lista-dot" />
+                        <span>{a.nombre}</span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            )}
+
+            {iaError && (
+              <div className="alert alert-error" style={{ marginTop: 12 }}>
+                {iaError}
+              </div>
+            )}
+
+            {!iaCargandoArchivos && (
+              <div style={{ marginTop: 12 }}>
+                <button
+                  className="btn btnPrimary"
+                  onClick={manejarGenerarResumenGrupo}
+                  disabled={iaGenerando}
+                >
+                  {iaGenerando ? "Generando resumen..." : "✨ Generar resumen con IA"}
+                </button>
+              </div>
+            )}
+
+            {iaResumen && (
+              <div className="ia-resultado" style={{ marginTop: 16 }}>
+                <strong style={{ display: "block", marginBottom: 8 }}>Resumen generado</strong>
+                <pre className="ia-pre">{iaResumen}</pre>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -1320,3 +1587,5 @@ export default function GrupoDetalle() {
     </div>
   );
 }
+
+  
