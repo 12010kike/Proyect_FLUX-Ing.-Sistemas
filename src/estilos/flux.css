@@ -216,17 +216,6 @@ body{
   box-shadow: 0 0 0 4px rgba(255, 155, 81, 0.15);
 }
 
-.brand-logo-img {
-  width: 80px;
-  height: 80px;
-  object-fit: contain;
-}
-
-.brand-logo-small {
-  width: 36px;
-  height: 36px;
-}
-
 .brandTitle{
   font-family: var(--fuente-display);
   font-weight: 800;

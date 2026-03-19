@@ -1,8 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { supabase } from '../config/supabaseClient'
-import '../estilos/flux.css'
-import logoFlux from '../assets/logo-flux.png'
+import { supabase } from '../config/supabaseClient' 
+import '../estilos/flux.css' 
 
 function Registro() {
   const navigate = useNavigate()
@@ -131,7 +130,8 @@ function Registro() {
       {/* HEADER: marca y subtítulo dinámico */}
       <div className="auth-header">
         <div className="brand">
-          <img src={logoFlux} alt="FLUX" className="brand-logo-img" />
+          <div className="logoDot"></div>
+          <span className="brandTitle" style={{ fontSize: '32px' }}>FLUX</span>
         </div>
         <span className="brandSubtitle" style={{ fontSize: '15px' }}>
           {esLogin ? 'Bienvenido de nuevo' : 'Únete a la comunidad'}
