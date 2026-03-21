@@ -2209,6 +2209,8 @@ select.input {
 .group-tab-content {
   display: grid;
   gap: var(--space-4);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .group-feed {
@@ -2533,6 +2535,9 @@ select.input {
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
   background: rgba(255, 155, 81, 0.1);
   border: 1px solid rgba(255, 155, 81, 0.3);
   border-radius: var(--radio-sm);
@@ -2552,6 +2557,10 @@ select.input {
   color: var(--texto);
   opacity: 0.6;
   font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
 }
 
 /* ── IA: resultado (pre-formatted text) ── */
