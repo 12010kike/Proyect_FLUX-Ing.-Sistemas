@@ -1568,7 +1568,8 @@ select.input {
 .home-footer {
   position: fixed;
   left: 50%;
-  transform: translateX(-50%);
+  -webkit-transform: translateX(-50%) translateZ(0);
+  transform: translateX(-50%) translateZ(0);
   bottom: 14px;
   width: min(420px, calc(100vw - 28px));
   height: 70px;
@@ -1583,6 +1584,7 @@ select.input {
   z-index: 230;
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
+  backface-visibility: hidden;
 }
 
 .home-footer-btn {
@@ -3923,7 +3925,6 @@ code {
 }
 
 /* ─── GPU acceleration para elementos fijos ──────────────────── */
-.home-footer,
 .topbar,
 .modal-overlay {
   -webkit-transform: translateZ(0);
