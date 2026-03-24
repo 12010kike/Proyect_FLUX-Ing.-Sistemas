@@ -1455,19 +1455,21 @@ select.input {
 
 .home-footer {
   position: fixed;
-  left: 50%;
-  transform: translateX(-50%);
-  bottom: 14px;
-  width: min(420px, calc(100vw - 28px));
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
   height: 70px;
-  border-radius: 20px;
-  border: 1px solid rgba(37, 52, 63, 0.15);
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: var(--sombra-lg);
+  border-radius: 0;
+  border: none;
+  border-top: 1px solid rgba(37, 52, 63, 0.1);
+  background: #ffffff;
+  box-shadow: 0 -2px 12px rgba(37, 52, 63, 0.08);
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: space-evenly;
   padding: 0 18px;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
   z-index: 230;
 }
 
@@ -2334,8 +2336,6 @@ select.input {
   }
   .home-footer {
     height: 66px;
-    bottom: 10px;
-    width: calc(100vw - 20px);
   }
   .home-footer-plus {
     width: 50px;
@@ -2926,8 +2926,7 @@ details[open] .ia-resumen-summary::before {
 /* --- Safe area insets for notched phones (iPhone X+, etc.) --- */
 .home-footer {
   padding-bottom: max(0px, env(safe-area-inset-bottom));
-  padding-left: max(18px, env(safe-area-inset-left));
-  padding-right: max(18px, env(safe-area-inset-right));
+  height: calc(70px + env(safe-area-inset-bottom, 0px));
 }
 
 .container {
@@ -3195,12 +3194,9 @@ textarea.input {
 
   /* --- Home footer: safe area + sizing --- */
   .home-footer {
-    bottom: max(12px, env(safe-area-inset-bottom));
-    height: 64px;
+    height: calc(64px + env(safe-area-inset-bottom, 0px));
     padding: 0 16px;
     padding-bottom: max(0px, env(safe-area-inset-bottom));
-    width: calc(100vw - 24px);
-    border-radius: 18px;
   }
 
   /* --- Drawer: full width on small phones --- */
