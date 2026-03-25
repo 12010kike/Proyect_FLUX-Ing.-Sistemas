@@ -13,7 +13,7 @@ export default defineConfig({
         short_name: 'FLUX',
         description: 'Plataforma de gestión de proyectos y grupos',
         theme_color: '#FF9B51',
-        background_color: '#EAEFEF',
+        background_color: '#2B3C49',
         display: 'standalone',
         start_url: '/',
         icons: [
