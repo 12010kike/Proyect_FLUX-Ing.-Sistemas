@@ -158,10 +158,14 @@ async function descargarComoBase64(url, mimeType) {
     const contentLength = res.headers.get("content-length");
     if (contentLength && parseInt(contentLength) > 15 * 1024 * 1024) return null;
     const buffer = await res.arrayBuffer();
+    // Convertir ArrayBuffer a base64 de forma segura (sin btoa() para evitar errores con caracteres fuera de latin-1)
     const bytes = new Uint8Array(buffer);
-    let binary = "";
-    for (const b of bytes) binary += String.fromCharCode(b);
-    return { base64: btoa(binary), mimeType };
+    const chunks = [];
+    const CHUNK = 8192;
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK)));
+    }
+    return { base64: btoa(chunks.join("")), mimeType };
   } catch {
     return null;
   }
@@ -190,11 +194,25 @@ async function llamarGeminiMultimodal(parts, { maxOutputTokens = 6000, temperatu
 
   const data = await response.json();
   const candidate = data.candidates?.[0];
+
   if (candidate?.finishReason === "MAX_TOKENS") {
     console.warn("[FLUX IA] Resumen cortado por límite de tokens.");
   }
-  const texto = candidate?.content?.parts?.[0]?.text;
-  if (!texto) throw new Error("La IA no generó una respuesta. Intenta de nuevo.");
+
+  // Gemini puede responder en múltiples partes: unir todo el texto
+  const texto = (candidate?.content?.parts || [])
+    .map(p => p.text || "")
+    .join("")
+    .trim();
+
+  if (!texto) {
+    // Diagnóstico para detectar el motivo real
+    const razon = candidate?.finishReason || "sin candidatos";
+    const bloqueo = data.promptFeedback?.blockReason || "";
+    console.error("[FLUX IA] Respuesta vacía. finishReason:", razon, "blockReason:", bloqueo, data);
+    throw new Error(`La IA no pudo procesar los archivos (${razon || bloqueo || "respuesta vacía"}). Intenta de nuevo.`);
+  }
+
   return texto;
 }
 
@@ -313,7 +331,14 @@ ${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de arch
     parts.push({ text: `[Archivo adjunto: "${archivo.nombre}"]` });
   }
 
-  return llamarGeminiMultimodal(parts, { maxOutputTokens: 8000, temperature: 0.5 });
+  return llamarGeminiMultimodal(parts, { maxOutputTokens: 8000, temperature: 0.5 })
+    .catch(errorMultimodal => {
+      // Si la llamada multimodal falla, reintentar solo con texto para garantizar una respuesta
+      console.warn("[FLUX IA] Llamada multimodal falló, reintentando sin archivos:", errorMultimodal.message);
+      const promptFallback = promptTexto +
+        "\n\n[NOTA INTERNA: Los archivos no pudieron procesarse en esta llamada. Analiza únicamente a partir de los nombres y tipos de archivo listados arriba.]";
+      return llamarGemini(promptFallback, { maxOutputTokens: 6000, temperature: 0.6 });
+    });
 }
 
 // ─────────────────────────────────────────────────────────
