@@ -198,19 +198,33 @@ async function llamarGeminiMultimodal(parts, { maxOutputTokens = 6000, temperatu
   return texto;
 }
 
+// Infiere el MIME type desde la extensión del archivo como fallback
+function inferirMimePorExtension(nombre = "") {
+  const ext = (nombre.split(".").pop() || "").toLowerCase();
+  const map = {
+    pdf:  "application/pdf",
+    png:  "image/png",
+    jpg:  "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif:  "image/gif",
+    heic: "image/heic"
+  };
+  return map[ext] || "";
+}
+
 export async function generarResumenRepositorio({ nombreRepo, archivos }) {
   const totalArchivos = archivos.length;
 
-  // ── Construir metadatos + descargar contenido de PDFs e imágenes ────────
-  // Limitamos a los primeros 8 archivos con contenido readable para no
-  // saturar el contexto de Gemini (~4 MB de base64 es el límite razonable)
+  // ── Descargar contenido de PDFs e imágenes ──────────────────────────────
   const MAX_ARCHIVOS_CON_CONTENIDO = 8;
   let archivosConContenido = 0;
 
   const archivosInfo = await Promise.all(
     archivos.map(async (a, i) => {
       const nombre = a.nombre || a.name || `Archivo ${i + 1}`;
-      const mime = (a.mime_type || a.content_type || "").toLowerCase();
+      // Usar mime_type de la BD; si no existe, inferirlo de la extensión del nombre
+      const mime = ((a.mime_type || a.content_type || "").toLowerCase()) || inferirMimePorExtension(nombre);
       const tamano = a.size_bytes ? `${(a.size_bytes / 1024).toFixed(1)} KB` : "";
       const fecha = a.created_at ? new Date(a.created_at).toLocaleDateString("es-VE") : "";
       const esLegible = MIME_SOPORTADOS_GEMINI.has(mime);
@@ -243,41 +257,46 @@ export async function generarResumenRepositorio({ nombreRepo, archivos }) {
   const archivosConContenidoLeido = archivosInfo.filter(a => a.inlineData).length;
   const archivosNoLeidos = totalArchivos - archivosConContenidoLeido;
 
-  const promptTexto = `Analiza en profundidad el siguiente repositorio de estudio universitario y genera un informe COMPLETO basado en el contenido real de los archivos adjuntos.
+  const promptTexto = `Eres un asistente académico y acabas de recibir los archivos de un repositorio universitario. Tu tarea es leer DETENIDAMENTE cada archivo adjunto y generar un informe de contenido detallado.
 
 📁 REPOSITORIO: "${nombreRepo}"
-📊 TOTAL DE ARCHIVOS: ${totalArchivos} (${archivosConContenidoLeido} con contenido leído, ${archivosNoLeidos} solo con metadata)
+📊 ARCHIVOS TOTALES: ${totalArchivos} (${archivosConContenidoLeido} archivos leídos con su contenido completo, ${archivosNoLeidos} solo con metadata)
 
-📄 LISTA DE ARCHIVOS:
+📄 ARCHIVOS:
 ${archivosTexto}
 
 ${archivosConContenidoLeido > 0
-    ? `Los archivos marcados con ✅ están adjuntos a este mensaje para que puedas leer su contenido completo.
-Extrae los temas, conceptos e información más importante de cada uno.`
-    : "Basa tu análisis en los nombres y tipos de archivo."}
+    ? `🔍 INSTRUCCIÓN CRÍTICA: Los archivos marcados con ✅ están adjuntos. DEBES leer su contenido completo y:
+- Citar párrafos, definiciones, fórmulas o secciones clave de cada documento
+- Explicar con tus propias palabras qué enseña o contiene cada archivo
+- NO uses frases como "el archivo probablemente contiene" o "basado en el nombre" — tienes el contenido real
+- Si un documento tiene secciones, enuméralas y explica de qué trata cada una`
+    : "Basa tu análisis únicamente en los nombres y extensiones de los archivos."}
 
-IMPORTANTE: Completa TODAS las secciones antes de terminar. No cortes la respuesta a la mitad.
+IMPORTANTE: Completa TODAS las secciones sin cortar la respuesta.
 
-Genera el siguiente informe:
+---
 
-## 📌 1. Resumen del Contenido
-${archivosConContenidoLeido > 0
-    ? "Describe los temas, conceptos principales y la información más relevante encontrada en cada archivo leído."
-    : "Describe qué temas cubre este repositorio según los nombres de los archivos."}
+## 📌 1. Contenido Detallado por Archivo
+Para cada archivo leído (✅), explica:
+- Los temas principales que aborda
+- Conceptos clave, definiciones o fórmulas importantes que aparecen
+- Estructura general del documento (secciones o partes)
+Para los archivos sin contenido (📋), describe brevemente qué se esperaría según su nombre.
 
 ## 📚 2. Orden de Estudio Recomendado
-Lista TODOS los archivos en el orden óptimo para estudiarlos, con justificación basada en el contenido o los nombres.
+Lista todos los archivos en el orden óptimo para estudiarlos, con justificación basada en el contenido real que leíste.
 
-## ⏱️ 3. Estimación de Tiempo de Estudio
-Estima cuánto tiempo tomaría revisar cada archivo y el total, basándote en el contenido o tamaño.
+## ⏱️ 3. Estimación de Tiempo
+Estima cuánto tiempo tomaría estudiar cada archivo basándote en su extensión, densidad de contenido o tamaño.
 
-## 💡 4. Recomendaciones de Estudio
-Da al menos 5 recomendaciones concretas basadas en el contenido real del repositorio.
+## 💡 4. Recomendaciones
+Al menos 5 recomendaciones concretas basadas en el contenido encontrado dentro de los archivos.
 
 ## ✅ 5. Conclusión
-Resumen motivacional con los puntos clave del repositorio.
+Cierre motivacional señalando los puntos más importantes del repositorio.
 
-${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de archivos convendría agregar dado el nombre." : ""}`;
+${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de archivos sería útil agregar." : ""}`;
 
   // ── Construir partes multimodales (texto + archivos inline) ─────────────
   const parts = [{ text: promptTexto }];

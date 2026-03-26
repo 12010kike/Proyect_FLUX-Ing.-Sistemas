@@ -1447,7 +1447,7 @@ export async function listarArchivosGrupoPorId({ grupoId }) {
 
   const { data, error } = await supabase
     .from("grupo_archivos")
-    .select("id, path, nombre, created_at")
+    .select("id, path, nombre, mime_type, size_bytes, created_at")
     .eq("grupo_id", grupoId)
     .order("created_at", { ascending: false });
   if (error) throw error;
