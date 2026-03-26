@@ -5,10 +5,10 @@ import { obtenerTotalesAdminHome } from "../servicios/grupos.api";
 
 const FECHA_OPTIONS = [
   { value: "all", label: "Sin filtro de fecha" },
-  { value: "1w", label: "Ultima semana" },
-  { value: "1m", label: "Ultimo mes" },
-  { value: "3m", label: "Ultimos 3 meses" },
-  { value: "1y", label: "Ultimo ano" }
+  { value: "1w", label: "Última semana" },
+  { value: "1m", label: "Último mes" },
+  { value: "3m", label: "Últimos 3 meses" },
+  { value: "1y", label: "Último año" }
 ];
 
 export default function MetricasFundador() {
@@ -74,7 +74,7 @@ export default function MetricasFundador() {
       const totales = await obtenerTotalesAdminHome({ fechaFiltro: filtroFechaMetricas });
       setTotalesAdmin(totales);
     } catch (e) {
-      setError(e.message || "No se pudieron cargar las metricas.");
+      setError(e.message || "No se pudieron cargar las métricas.");
     } finally {
       setCargandoTotalesAdmin(false);
     }
@@ -129,7 +129,7 @@ export default function MetricasFundador() {
           </svg>
         </button>
         <div className="home-header-title-wrap">
-          <div className="home-header-title">Metricas</div>
+          <div className="home-header-title">Métricas</div>
           <div className="logoDot home-header-dot" />
         </div>
       </div>
@@ -143,7 +143,7 @@ export default function MetricasFundador() {
       ) : !esFundadorVista ? (
         <div className="card">
           <strong>Acceso restringido</strong>
-          <div className="label">Solo usuarios fundadores pueden ver metricas.</div>
+          <div className="label">Solo usuarios fundadores pueden ver métricas.</div>
           <button className="btn" onClick={() => navigate("/grupos")}>Volver</button>
         </div>
       ) : (
@@ -167,7 +167,7 @@ export default function MetricasFundador() {
           </div>
 
           {cargandoTotalesAdmin ? (
-            <div className="label" style={{ marginBottom: 0 }}>Cargando metricas...</div>
+            <div className="label" style={{ marginBottom: 0 }}>Cargando métricas...</div>
           ) : (
             <>
               <div className="admin-stats-grid">
