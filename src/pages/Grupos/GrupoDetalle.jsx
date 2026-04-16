@@ -1,5 +1,21 @@
+/**
+ * COMPONENTE: GrupoDetalle
+ * ----------------------------------------------------------------------
+ * Vista principal e integral de un Grupo/Repositorio.
+ * Maneja múltiples pestañas (Stream, Chat en tiempo real, Archivos, 
+ * Personas, Tareas e IA) e implementa suscripciones a Supabase Channels.
+ */
+
+// ─── 1. IMPORTACIONES ───────────────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { supabase } from "../../config/supabaseClient";
+import "../../estilos/flux.css";
+import logoFlux from "../../assets/logo-flux.png";
+import TaskMaster from "../Tareas/TaskMaster";
+import { PALETA_BANNERS, obtenerColorEntidad } from "../../utils/groupColors";
+
+// Endpoints / API Services
 import {
   actualizarVisibilidadGrupo,
   actualizarNombreGrupo,
@@ -12,49 +28,53 @@ import {
   listarMensajesGrupo,
   enviarMensajeGrupo,
   listarLecturasMensajes,
-  marcarMensajesLeidos
-} from "../servicios/grupos.api";
-import { supabase } from "../config/supabaseClient";
-import { PALETA_BANNERS, obtenerColorEntidad } from "../utils/groupColors";
-import "../estilos/flux.css";
-import TaskMaster from "./TaskMaster";
-import {
+  marcarMensajesLeidos,
   listarTareasGrupo,
   crearTareaGrupo,
   toggleTareaGrupo,
   editarTareaGrupo,
   eliminarTareaGrupo,
   listarArchivosGrupoPorId
-} from "../servicios/grupos.api";
-import { generarResumenRepositorio } from "../servicios/ia.api";
+} from "../../servicios/grupos.api";
+import { generarResumenRepositorio } from "../../servicios/ia.api";
 
 export default function GrupoDetalle() {
+  
+  // ─── 2. ESTADOS LOCALES Y REFERENCIAS ──────────────────────────────────
   const { codigo } = useParams();
   const navigate = useNavigate();
 
-  const [grupo, setGrupo] = useState(null);
-  const [cargandoGrupo, setCargandoGrupo] = useState(true);
+  // -- Usuario y Sesión
   const [userId, setUserId] = useState(null);
   const [sesionCargada, setSesionCargada] = useState(false);
   const [avatarUrl, setAvatarUrl] = useState("");
   const [displayName, setDisplayName] = useState("");
+  
+  // -- Información del Grupo
+  const [grupo, setGrupo] = useState(null);
+  const [cargandoGrupo, setCargandoGrupo] = useState(true);
   const [esAdmin, setEsAdmin] = useState(false);
-
   const [tabActiva, setTabActiva] = useState("stream");
-  const [tareas, setTareas] = useState([]);
+  const [error, setError] = useState("");
+  
+  // -- Stream y Ajustes de Grupo
   const [nuevoNombreGrupo, setNuevoNombreGrupo] = useState("");
   const [nuevoAnuncio, setNuevoAnuncio] = useState("");
   const [guardandoVisibilidad, setGuardandoVisibilidad] = useState(false);
   const [guardandoColorGrupo, setGuardandoColorGrupo] = useState(false);
   const [colorGrupoSeleccionado, setColorGrupoSeleccionado] = useState(PALETA_BANNERS[0].id);
-  const [error, setError] = useState("");
 
+  // -- Tareas
+  const [tareas, setTareas] = useState([]);
+
+  // -- Archivos (Subida y Listado)
   const [archivosSeleccionados, setArchivosSeleccionados] = useState([]);
   const [archivosSubidos, setArchivosSubidos] = useState([]);
   const [subiendo, setSubiendo] = useState(false);
   const [mensajeSubida, setMensajeSubida] = useState("");
   const inputRef = useRef(null);
 
+  // -- Chat en Tiempo Real y Lecturas
   const [mensajesChat, setMensajesChat] = useState([]);
   const [nuevoMensaje, setNuevoMensaje] = useState("");
   const [cargandoChat, setCargandoChat] = useState(false);
@@ -65,12 +85,14 @@ export default function GrupoDetalle() {
   const [errorChat, setErrorChat] = useState("");
   const [lecturasPorMensaje, setLecturasPorMensaje] = useState({});
   const [lecturasIdsPorMensaje, setLecturasIdsPorMensaje] = useState({});
+  const [avatarPorUsuario, setAvatarPorUsuario] = useState({});
+  
   const lecturasRef = useRef({});
   const mensajesRef = useRef([]);
   const chatEndRef = useRef(null);
   const chatScrollRef = useRef(null);
-  const [avatarPorUsuario, setAvatarPorUsuario] = useState({});
 
+  // -- Personas y Perfiles (Modal)
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
   const [miembroActivo, setMiembroActivo] = useState(null);
   const [perfilMiembro, setPerfilMiembro] = useState(null);
@@ -79,13 +101,15 @@ export default function GrupoDetalle() {
   const [horarioMiembro, setHorarioMiembro] = useState([]);
   const [cargandoPerfil, setCargandoPerfil] = useState(false);
   const [errorPerfil, setErrorPerfil] = useState("");
-  // ── IA tab ──────────────────────────────────────────────
+
+  // -- Inteligencia Artificial (Resumidor)
   const [iaArchivos, setIaArchivos] = useState([]);
   const [iaCargandoArchivos, setIaCargandoArchivos] = useState(false);
   const [iaGenerando, setIaGenerando] = useState(false);
   const [iaResumen, setIaResumen] = useState("");
   const [iaError, setIaError] = useState("");
 
+  // ─── 3. CONSTANTES Y VARIABLES COMPUTADAS (Memos) ──────────────────────
   const DIAS = [
     { value: 1, label: "Lun" },
     { value: 2, label: "Mar" },
@@ -97,6 +121,7 @@ export default function GrupoDetalle() {
   ];
 
   const totalMiembros = grupo?.miembros?.length || 0;
+  
   const miembrosPorId = useMemo(() => {
     const map = new Map();
     (grupo?.miembros || []).forEach(m => {
@@ -104,69 +129,6 @@ export default function GrupoDetalle() {
     });
     return map;
   }, [grupo]);
-
-  const cargarTareas = async (idGrupo) => {
-    if (!idGrupo) return;
-    try {
-      const data = await listarTareasGrupo(idGrupo);
-      setTareas(data || []);
-    } catch (error) {
-      console.error("Error cargando tareas:", error);
-    }
-  };
-
-  useEffect(() => {
-    if (grupo?.id) {
-      cargarTareas(grupo.id);
-    }
-  }, [grupo?.id]);
-
-  // --- HANDLERS DE TAREAS ---
-
-  const handleAgregarTarea = async (texto) => {
-    try {
-        // Asumiendo que crearTareaGrupo devuelve la tarea creada con su ID de base de datos
-        const nuevaTarea = await crearTareaGrupo({ grupoId: grupo.id, titulo: texto });
-        setTareas([...tareas, nuevaTarea]);
-    } catch (error) {
-        console.error("Error al agregar tarea:", error);
-    }
-  };
-
-  const handleToggleTarea = async (tareaId, completada) => {
-    try {
-      setTareas(tareas.map(t => t.id === tareaId ? { ...t, completada } : t));
-      await toggleTareaGrupo({ tareaId, completada });
-    } catch (error) {
-      console.error("Error actualizando tarea:", error);
-      cargarTareas(grupo.id); 
-    }
-  };
-
-  const handleEditarTarea = async (tareaId, nuevoTitulo) => {
-    try {
-      // 1. Actualización optimista en la UI
-      setTareas(tareas.map(t => t.id === tareaId ? { ...t, titulo: nuevoTitulo } : t));
-      
-      // 2. Llamada a la API
-      await editarTareaGrupo({ tareaId, titulo: nuevoTitulo });
-    } catch (error) {
-      console.error("Error editando tarea:", error);
-      // Opcional: recargar tareas si hay error para revertir UI
-      cargarTareas(grupo.id);
-    }
-  };
-
-  const handleBorrarTarea = async (tareaId) => {
-    try {
-      await eliminarTareaGrupo({ tareaId });
-      setTareas(tareas.filter(t => t.id !== tareaId));
-    } catch (error) {
-      console.error("Error borrando tarea:", error);
-    }
-  };
-
-  // --- FIN HANDLERS TAREAS ---
 
   const puedePublicarAnuncio = useMemo(
     () => Boolean(userId && grupo?.creadorId && userId === grupo.creadorId),
@@ -205,70 +167,214 @@ export default function GrupoDetalle() {
         const autorPorId = grupo?.miembros?.find(m => m.user_id === a.actor_id)?.nombre;
 
         if (msg.startsWith("ANUNCIO::")) {
-          return {
-            tipo: "anuncio",
-            autor: autorPorId || "Creador",
-            fecha: a.fecha,
-            texto: msg.replace("ANUNCIO::", "")
-          };
+          return { tipo: "anuncio", autor: autorPorId || "Creador", fecha: a.fecha, texto: msg.replace("ANUNCIO::", "") };
         }
-
         if (msg.startsWith("ARCHIVO::")) {
-          return {
-            tipo: "archivo",
-            autor: autorPorId || "Sistema",
-            fecha: a.fecha,
-            texto: msg.replace("ARCHIVO::", "")
-          };
+          return { tipo: "archivo", autor: autorPorId || "Sistema", fecha: a.fecha, texto: msg.replace("ARCHIVO::", "") };
         }
-
         if (msg.startsWith("RENOMBRE::")) {
-          return {
-            tipo: "renombre",
-            autor: autorPorId || "Sistema",
-            fecha: a.fecha,
-            texto: msg.replace("RENOMBRE::", "")
-          };
+          return { tipo: "renombre", autor: autorPorId || "Sistema", fecha: a.fecha, texto: msg.replace("RENOMBRE::", "") };
         }
-
         if (msg.startsWith("VISIBILIDAD::")) {
-          return {
-            tipo: "visibilidad",
-            autor: autorPorId || "Sistema",
-            fecha: a.fecha,
-            texto: msg.replace("VISIBILIDAD::", "")
-          };
+          return { tipo: "visibilidad", autor: autorPorId || "Sistema", fecha: a.fecha, texto: msg.replace("VISIBILIDAD::", "") };
         }
-
         if (msg.startsWith("COLOR::")) {
-          return {
-            tipo: "color",
-            autor: autorPorId || "Sistema",
-            fecha: a.fecha,
-            texto: msg.replace("COLOR::", "")
-          };
+          return { tipo: "color", autor: autorPorId || "Sistema", fecha: a.fecha, texto: msg.replace("COLOR::", "") };
         }
 
         const autorPorTexto = msg.match(/^(.+?)\sse ha unido/i)?.[1]?.trim();
         const autor = autorPorId || autorPorTexto || "Sistema";
+        
         if (msg.includes("se ha unido")) {
-          return {
-            tipo: "union",
-            autor,
-            fecha: a.fecha,
-            texto: `${autor} se unió al grupo`
-          };
+          return { tipo: "union", autor, fecha: a.fecha, texto: `${autor} se unió al grupo` };
         }
 
-        return {
-          tipo: "sistema",
-          autor,
-          fecha: a.fecha,
-          texto: msg
-        };
+        return { tipo: "sistema", autor, fecha: a.fecha, texto: msg };
       });
   }, [grupo]);
 
+  // ─── 4. EFECTOS DE CICLO DE VIDA Y REALTIME ────────────────────────────
+
+  // Cargar Tareas al iniciar grupo
+  useEffect(() => {
+    if (grupo?.id) {
+      cargarTareas(grupo.id);
+    }
+  }, [grupo?.id]);
+
+  // Obtener sesión activa al montar
+  useEffect(() => {
+    (async () => {
+      const {
+        data: { session },
+        error: sessionError
+      } = await supabase.auth.getSession();
+      
+      if (sessionError) {
+        setError("No se pudo leer la sesión.");
+        setSesionCargada(true);
+        return;
+      }
+      
+      setUserId(session?.user?.id || null);
+      setAvatarUrl(session?.user?.user_metadata?.avatar_url?.trim() || "");
+      setDisplayName(session?.user?.user_metadata?.display_name?.trim() || "");
+      setSesionCargada(true);
+    })();
+  }, []);
+
+  // Cargar información principal del grupo
+  useEffect(() => {
+    (async () => {
+      if (!sesionCargada) return;
+      if (!codigo) {
+        setGrupo(null);
+        setCargandoGrupo(false);
+        return;
+      }
+      setCargandoGrupo(true);
+      const grupoActual = await recargarGrupo();
+      await listarArchivos(grupoActual?.id || null);
+      setCargandoGrupo(false);
+    })();
+  }, [codigo, userId, sesionCargada]);
+
+  // Control de scroll automático en el Chat
+  useEffect(() => {
+    mensajesRef.current = mensajesChat;
+    if (tabActiva === "chat" && (chatInicialListo || isNearBottom())) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [mensajesChat, tabActiva]);
+
+  // Ajuste inicial del chat al abrir la pestaña
+  useEffect(() => {
+    if (tabActiva !== "chat" || !chatInicialListo) return;
+    requestAnimationFrame(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: "auto" });
+      setChatInicialListo(false);
+    });
+  }, [tabActiva, chatInicialListo]);
+
+  // Cargar historial de chat y avatares
+  useEffect(() => {
+    if (tabActiva !== "chat" || !grupo?.id) return;
+    cargarChat(grupo.id);
+    cargarAvataresChat();
+  }, [tabActiva, grupo?.id, userId]);
+
+  // Suscripción a WebSockets (Realtime) para Chat y Lecturas
+  useEffect(() => {
+    if (tabActiva !== "chat" || !grupo?.id) return;
+
+    const mensajesChannel = supabase
+      .channel(`grupo-chat-${grupo.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "grupo_mensajes", filter: `grupo_id=eq.${grupo.id}` },
+        payload => {
+          const nuevo = payload.new;
+          if (!nuevo) return;
+          setMensajesChat(prev => {
+            if (prev.some(m => m.id === nuevo.id)) return prev;
+            return [...prev, nuevo];
+          });
+          if (userId && nuevo.user_id !== userId) {
+            marcarMensajesLeidos({ mensajeIds: [nuevo.id] }).catch(() => {});
+          }
+        }
+      )
+      .subscribe();
+
+    const lecturasChannel = supabase
+      .channel(`grupo-chat-reads-${grupo.id}`)
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "grupo_mensaje_lecturas" },
+        payload => {
+          const nuevo = payload.new;
+          if (!nuevo) return;
+          const existe = mensajesRef.current.some(m => m.id === nuevo.mensaje_id);
+          if (!existe) return;
+          agregarLecturaLocal(nuevo.mensaje_id, nuevo.user_id);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(mensajesChannel);
+      supabase.removeChannel(lecturasChannel);
+    };
+  }, [tabActiva, grupo?.id, userId]);
+
+  // Cargar archivos para alimentar la IA
+  useEffect(() => {
+    if (tabActiva !== "ia" || !grupo?.id) return;
+    const cargar = async () => {
+      setIaCargandoArchivos(true);
+      setIaError("");
+      try {
+        const data = await listarArchivosGrupoPorId({ grupoId: grupo.id });
+        setIaArchivos(data);
+      } catch (e) {
+        setIaError("No se pudieron cargar los archivos: " + e.message);
+      } finally {
+        setIaCargandoArchivos(false);
+      }
+    };
+    cargar();
+  }, [tabActiva, grupo?.id]);
+
+  // ─── 5. FUNCIONES DE TAREAS ────────────────────────────────────────────
+  const cargarTareas = async (idGrupo) => {
+    if (!idGrupo) return;
+    try {
+      const data = await listarTareasGrupo(idGrupo);
+      setTareas(data || []);
+    } catch (error) {
+      console.error("Error cargando tareas:", error);
+    }
+  };
+
+  const handleAgregarTarea = async (texto) => {
+    try {
+        const nuevaTarea = await crearTareaGrupo({ grupoId: grupo.id, titulo: texto });
+        setTareas([...tareas, nuevaTarea]);
+    } catch (error) {
+        console.error("Error al agregar tarea:", error);
+    }
+  };
+
+  const handleToggleTarea = async (tareaId, completada) => {
+    try {
+      setTareas(tareas.map(t => t.id === tareaId ? { ...t, completada } : t));
+      await toggleTareaGrupo({ tareaId, completada });
+    } catch (error) {
+      console.error("Error actualizando tarea:", error);
+      cargarTareas(grupo.id); 
+    }
+  };
+
+  const handleEditarTarea = async (tareaId, nuevoTitulo) => {
+    try {
+      setTareas(tareas.map(t => t.id === tareaId ? { ...t, titulo: nuevoTitulo } : t));
+      await editarTareaGrupo({ tareaId, titulo: nuevoTitulo });
+    } catch (error) {
+      console.error("Error editando tarea:", error);
+      cargarTareas(grupo.id);
+    }
+  };
+
+  const handleBorrarTarea = async (tareaId) => {
+    try {
+      await eliminarTareaGrupo({ tareaId });
+      setTareas(tareas.filter(t => t.id !== tareaId));
+    } catch (error) {
+      console.error("Error borrando tarea:", error);
+    }
+  };
+
+  // ─── 6. FUNCIONES DE CHAT Y LECTURAS ───────────────────────────────────
   const actualizarLecturasDesdeRows = rows => {
     const map = {};
     (rows || []).forEach(r => {
@@ -276,15 +382,13 @@ export default function GrupoDetalle() {
       map[r.mensaje_id].add(r.user_id);
     });
     lecturasRef.current = map;
+    
     const counts = {};
-    Object.keys(map).forEach(id => {
-      counts[id] = map[id].size;
-    });
+    Object.keys(map).forEach(id => counts[id] = map[id].size);
     setLecturasPorMensaje(counts);
+    
     const idsMap = {};
-    Object.keys(map).forEach(id => {
-      idsMap[id] = Array.from(map[id]);
-    });
+    Object.keys(map).forEach(id => idsMap[id] = Array.from(map[id]));
     setLecturasIdsPorMensaje(idsMap);
   };
 
@@ -293,16 +397,12 @@ export default function GrupoDetalle() {
     const map = lecturasRef.current || {};
     if (!map[mensajeId]) map[mensajeId] = new Set();
     if (map[mensajeId].has(usuarioId)) return;
+    
     map[mensajeId].add(usuarioId);
     lecturasRef.current = map;
-    setLecturasPorMensaje(prev => ({
-      ...prev,
-      [mensajeId]: map[mensajeId].size
-    }));
-    setLecturasIdsPorMensaje(prev => ({
-      ...prev,
-      [mensajeId]: Array.from(map[mensajeId])
-    }));
+    
+    setLecturasPorMensaje(prev => ({ ...prev, [mensajeId]: map[mensajeId].size }));
+    setLecturasIdsPorMensaje(prev => ({ ...prev, [mensajeId]: Array.from(map[mensajeId]) }));
   };
 
   const mergeLecturas = rows => {
@@ -313,6 +413,7 @@ export default function GrupoDetalle() {
       map[r.mensaje_id].add(r.user_id);
     });
     lecturasRef.current = map;
+    
     const counts = {};
     const idsMap = {};
     Object.keys(map).forEach(id => {
@@ -364,26 +465,28 @@ export default function GrupoDetalle() {
     if (!grupo?.id || !chatTieneMas || cargandoMasChat) return;
     setCargandoMasChat(true);
     setErrorChat("");
+    
     const container = chatScrollRef.current;
     const prevHeight = container?.scrollHeight || 0;
     const prevTop = container?.scrollTop || 0;
+    
     try {
-      const data = await listarMensajesGrupo({
-        grupoId: grupo.id,
-        limite: 20,
-        before: chatCursor
-      });
+      const data = await listarMensajesGrupo({ grupoId: grupo.id, limite: 20, before: chatCursor });
+      
       if (!data || data.length === 0) {
         setChatTieneMas(false);
         return;
       }
+      
       setMensajesChat(prev => [...data, ...prev]);
       const ids = data.map(m => m.id);
       const lecturas = await listarLecturasMensajes({ mensajeIds: ids });
       mergeLecturas(lecturas);
+      
       const oldest = data?.[0]?.created_at || chatCursor;
       setChatCursor(oldest);
       if (data.length < 20) setChatTieneMas(false);
+      
       requestAnimationFrame(() => {
         if (!container) return;
         const newHeight = container.scrollHeight;
@@ -397,8 +500,7 @@ export default function GrupoDetalle() {
   };
 
   const manejarEnviarMensaje = async () => {
-    if (!grupo?.id) return;
-    if (!nuevoMensaje.trim()) return;
+    if (!grupo?.id || !nuevoMensaje.trim()) return;
     setErrorChat("");
     try {
       const creado = await enviarMensajeGrupo({
@@ -416,19 +518,23 @@ export default function GrupoDetalle() {
     }
   };
 
+  // ─── 7. FUNCIONES DEL GRUPO (Información, Archivos y Anuncios) ─────────
   async function recargarGrupo() {
     if (!codigo) return;
     const g = await obtenerVistaPreviaPorCodigo(codigo);
+    
     if (g && !g.esPublico && !userId) {
       setGrupo(null);
       setError("Inicia sesión para ver este grupo.");
       return null;
     }
+    
     setGrupo(g);
     setNuevoNombreGrupo(g?.nombre || "");
     setColorGrupoSeleccionado(g?.color_id || PALETA_BANNERS[0].id);
     const miembro = g?.miembros?.find(m => m.user_id === userId);
     setEsAdmin(Boolean(miembro?.is_admin));
+    
     return g || null;
   }
 
@@ -443,151 +549,11 @@ export default function GrupoDetalle() {
         .select("path, nombre, created_at, uploader_id")
         .eq("grupo_id", grupoId)
         .order("created_at", { ascending: false });
+        
       if (listError) throw listError;
       setArchivosSubidos(data || []);
     } catch (e) {
       setMensajeSubida(`Error al listar archivos: ${e.message}`);
-    }
-  }
-
-  useEffect(() => {
-    (async () => {
-      const {
-        data: { session },
-        error: sessionError
-      } = await supabase.auth.getSession();
-      if (sessionError) {
-        setError("No se pudo leer la sesión.");
-        setSesionCargada(true);
-        return;
-      }
-      setUserId(session?.user?.id || null);
-      setAvatarUrl(session?.user?.user_metadata?.avatar_url?.trim() || "");
-      setDisplayName(session?.user?.user_metadata?.display_name?.trim() || "");
-      setSesionCargada(true);
-    })();
-  }, []);
-
-  useEffect(() => {
-    (async () => {
-      if (!sesionCargada) return;
-      if (!codigo) {
-        setGrupo(null);
-        setCargandoGrupo(false);
-        return;
-      }
-      setCargandoGrupo(true);
-      const grupoActual = await recargarGrupo();
-      await listarArchivos(grupoActual?.id || null);
-      setCargandoGrupo(false);
-    })();
-  }, [codigo, userId, sesionCargada]);
-
-  useEffect(() => {
-    mensajesRef.current = mensajesChat;
-    if (tabActiva === "chat" && (chatInicialListo || isNearBottom())) {
-      chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [mensajesChat, tabActiva]);
-
-  useEffect(() => {
-    if (tabActiva !== "chat" || !chatInicialListo) return;
-    requestAnimationFrame(() => {
-      chatEndRef.current?.scrollIntoView({ behavior: "auto" });
-      setChatInicialListo(false);
-    });
-  }, [tabActiva, chatInicialListo]);
-
-  useEffect(() => {
-    if (tabActiva !== "chat" || !grupo?.id) return;
-    cargarChat(grupo.id);
-    cargarAvataresChat();
-  }, [tabActiva, grupo?.id, userId]);
-
-  useEffect(() => {
-    if (tabActiva !== "chat" || !grupo?.id) return;
-
-    const mensajesChannel = supabase
-      .channel(`grupo-chat-${grupo.id}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "grupo_mensajes", filter: `grupo_id=eq.${grupo.id}` },
-        payload => {
-          const nuevo = payload.new;
-          if (!nuevo) return;
-          setMensajesChat(prev => {
-            if (prev.some(m => m.id === nuevo.id)) return prev;
-            return [...prev, nuevo];
-          });
-          if (userId && nuevo.user_id !== userId) {
-            marcarMensajesLeidos({ mensajeIds: [nuevo.id] }).catch(() => {});
-          }
-        }
-      )
-      .subscribe();
-
-    const lecturasChannel = supabase
-      .channel(`grupo-chat-reads-${grupo.id}`)
-      .on(
-        "postgres_changes",
-        { event: "INSERT", schema: "public", table: "grupo_mensaje_lecturas" },
-        payload => {
-          const nuevo = payload.new;
-          if (!nuevo) return;
-          const existe = mensajesRef.current.some(m => m.id === nuevo.mensaje_id);
-          if (!existe) return;
-          agregarLecturaLocal(nuevo.mensaje_id, nuevo.user_id);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(mensajesChannel);
-      supabase.removeChannel(lecturasChannel);
-    };
-  }, [tabActiva, grupo?.id, userId]);
-
-  useEffect(() => {
-    if (tabActiva !== "ia" || !grupo?.id) return;
-    const cargar = async () => {
-      setIaCargandoArchivos(true);
-      setIaError("");
-      try {
-        const data = await listarArchivosGrupoPorId({ grupoId: grupo.id });
-        setIaArchivos(data);
-      } catch (e) {
-        setIaError("No se pudieron cargar los archivos: " + e.message);
-      } finally {
-        setIaCargandoArchivos(false);
-      }
-    };
-    cargar();
-  }, [tabActiva, grupo?.id]);
-
-  async function manejarGenerarResumenGrupo() {
-    setIaError("");
-    setIaResumen("");
-    setIaGenerando(true);
-    try {
-      const resumen = await generarResumenRepositorio({
-        nombreRepo: grupo.nombre,
-        archivos: iaArchivos
-      });
-      setIaResumen(resumen);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id) {
-        await supabase.from("ia_resumenes").insert({
-          user_id: session.user.id,
-          repositorio_tipo: "grupo",
-          repositorio_id: grupo.id,
-          resumen
-        });
-      }
-    } catch (e) {
-      setIaError(e.message);
-    } finally {
-      setIaGenerando(false);
     }
   }
 
@@ -620,10 +586,7 @@ export default function GrupoDetalle() {
     setMensajeSubida("");
 
     try {
-      const {
-        data: { session },
-        error: sessionError
-      } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       if (sessionError) throw sessionError;
       const uploaderId = session?.user?.id || null;
 
@@ -631,9 +594,7 @@ export default function GrupoDetalle() {
         const safeName = archivo.name.replace(/[^a-zA-Z0-9.-]/g, "_");
         const path = `archivos/${codigo}/${Date.now()}-${safeName}`;
 
-        const { error: uploadError } = await supabase.storage
-          .from("Flux_repositorioGrupos")
-          .upload(path, archivo);
+        const { error: uploadError } = await supabase.storage.from("Flux_repositorioGrupos").upload(path, archivo);
         if (uploadError) throw uploadError;
 
         if (grupo?.id) {
@@ -651,6 +612,7 @@ export default function GrupoDetalle() {
 
       setMensajeSubida(`${archivosSeleccionados.length} archivo(s) subido(s) exitosamente.`);
       setArchivosSeleccionados([]);
+      
       if (grupo?.id && userId) {
         await supabase.from("grupo_actividad").insert({
           grupo_id: grupo.id,
@@ -658,8 +620,10 @@ export default function GrupoDetalle() {
           mensaje: `ARCHIVO::${displayName || "Usuario"} subió ${archivosSeleccionados.length} archivo(s).`
         });
       }
+      
       await recargarGrupo();
       await listarArchivos();
+      
     } catch (e) {
       setMensajeSubida(`Error al subir: ${e.message}`);
     } finally {
@@ -669,15 +633,15 @@ export default function GrupoDetalle() {
 
   async function manejarEliminarArchivo(fullPath) {
     if (!grupo) return;
-    const { error: removeError } = await supabase.storage
-      .from("Flux_repositorioGrupos")
-      .remove([fullPath]);
+    const { error: removeError } = await supabase.storage.from("Flux_repositorioGrupos").remove([fullPath]);
+    
     if (removeError && !`${removeError.message}`.includes("22P02")) {
       setMensajeSubida(`Error al eliminar archivo: ${removeError.message}`);
       return;
     }
 
     await eliminarArchivoGrupo({ grupoId: grupo.id, path: fullPath });
+    
     if (userId) {
       await supabase.from("grupo_actividad").insert({
         grupo_id: grupo.id,
@@ -717,8 +681,7 @@ export default function GrupoDetalle() {
   }
 
   async function manejarGuardarNombre() {
-    if (!grupo) return;
-    if (!nuevoNombreGrupo.trim()) return;
+    if (!grupo || !nuevoNombreGrupo.trim()) return;
     setError("");
     try {
       await actualizarNombreGrupo({
@@ -755,8 +718,7 @@ export default function GrupoDetalle() {
   }
 
   async function manejarGuardarColorGrupo() {
-    if (!grupo?.id) return;
-    if (!puedePublicarAnuncio) return;
+    if (!grupo?.id || !puedePublicarAnuncio) return;
     setError("");
     setGuardandoColorGrupo(true);
     try {
@@ -800,43 +762,37 @@ export default function GrupoDetalle() {
     navigate("/grupos");
   }
 
+  // ─── 8. FUNCIONES DE PERFIL Y AVATARES ─────────────────────────────────
   const buscarAvatarPorCarpeta = async miembroId => {
     const { data: files } = await supabase.storage
       .from("Flux_repositorioGrupos")
-      .list(`avatars/${miembroId}`, {
-        limit: 1,
-        offset: 0,
-        sortBy: { column: "created_at", order: "desc" }
-      });
+      .list(`avatars/${miembroId}`, { limit: 1, offset: 0, sortBy: { column: "created_at", order: "desc" } });
 
     const file = (files || [])[0];
     if (!file) return "";
 
-    const { data: urlData } = supabase.storage
-      .from("Flux_repositorioGrupos")
-      .getPublicUrl(`avatars/${miembroId}/${file.name}`);
-
+    const { data: urlData } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(`avatars/${miembroId}/${file.name}`);
     return urlData?.publicUrl || "";
   };
 
   const cargarAvataresChat = async () => {
     const miembros = grupo?.miembros || [];
     if (!miembros.length) return;
+    
     const entries = await Promise.all(
       miembros.map(async m => {
         if (!m?.user_id) return [null, ""];
-        if (m.user_id === userId && avatarUrl) {
-          return [m.user_id, avatarUrl];
-        }
-        const { data: urlData } = supabase.storage
-          .from("Flux_repositorioGrupos")
-          .getPublicUrl(`avatars/${m.user_id}`);
+        if (m.user_id === userId && avatarUrl) return [m.user_id, avatarUrl];
+        
+        const { data: urlData } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(`avatars/${m.user_id}`);
         const directUrl = urlData?.publicUrl || "";
         if (directUrl) return [m.user_id, directUrl];
+        
         const url = await buscarAvatarPorCarpeta(m.user_id);
         return [m.user_id, url];
       })
     );
+    
     const map = {};
     entries.forEach(([id, url]) => {
       if (!id) return;
@@ -862,24 +818,18 @@ export default function GrupoDetalle() {
       .select("nombre, apellido, career")
       .eq("id", miembro.user_id)
       .maybeSingle();
-    if (perfilError) {
-      setErrorPerfil("No se pudo cargar el perfil.");
-    } else {
-      perfil = perfilData;
-    }
+      
+    if (perfilError) setErrorPerfil("No se pudo cargar el perfil.");
+    else perfil = perfilData;
 
     const { data: bloquesData, error: bloquesError } = await supabase
       .from("bloques_horario")
       .select("id, day_of_week, start_time, end_time, type")
       .eq("user_id", miembro.user_id);
 
-    if (bloquesError) {
-      setErrorPerfil("No se pudo cargar el horario del miembro.");
-    }
+    if (bloquesError) setErrorPerfil("No se pudo cargar el horario del miembro.");
 
-    const { data: avatarData } = supabase.storage
-      .from("Flux_repositorioGrupos")
-      .getPublicUrl(`avatars/${miembro.user_id}`);
+    const { data: avatarData } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(`avatars/${miembro.user_id}`);
 
     setAvatarMiembroUrl(avatarData?.publicUrl || "");
     setPerfilMiembro(perfil);
@@ -895,6 +845,32 @@ export default function GrupoDetalle() {
     setCargandoPerfil(false);
   };
 
+  // ─── 9. FUNCIONES DE INTELIGENCIA ARTIFICIAL ───────────────────────────
+  async function manejarGenerarResumenGrupo() {
+    setIaError("");
+    setIaResumen("");
+    setIaGenerando(true);
+    try {
+      const resumen = await generarResumenRepositorio({ nombreRepo: grupo.nombre, archivos: iaArchivos });
+      setIaResumen(resumen);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        await supabase.from("ia_resumenes").insert({
+          user_id: session.user.id,
+          repositorio_tipo: "grupo",
+          repositorio_id: grupo.id,
+          resumen
+        });
+      }
+    } catch (e) {
+      setIaError(e.message);
+    } finally {
+      setIaGenerando(false);
+    }
+  }
+
+  // ─── 10. RENDERIZADOS CONDICIONALES (Estados vacíos o Errores) ─────────
   if (cargandoGrupo) {
     return (
       <div className="container">
@@ -936,20 +912,8 @@ export default function GrupoDetalle() {
           <p>Verifique el código e intente nuevamente.</p>
           {error && <p>{error}</p>}
           <button className="btn arrow-back" onClick={() => navigate("/grupos")} aria-label="Atrás">
-            <svg
-              className="arrow-back-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <path
-                d="M15 6L9 12L15 18"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+            <svg className="arrow-back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M15 6L9 12L15 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
         </div>
@@ -957,6 +921,8 @@ export default function GrupoDetalle() {
     );
   }
 
+  // ─── 11. RENDER PRINCIPAL (JSX) ────────────────────────────────────────
+  
   const colorGrupo = obtenerColorEntidad({
     tipo: "grupo",
     entidadId: grupo.id,
@@ -966,30 +932,13 @@ export default function GrupoDetalle() {
   
   return (
     <div className="container">
-      <div
-        className="group-banner"
-        style={{ "--banner-a": colorGrupo.a, "--banner-b": colorGrupo.b }}
-      >
+      
+      {/* --- BANNER --- */}
+      <div className="group-banner" style={{ "--banner-a": colorGrupo.a, "--banner-b": colorGrupo.b }}>
         <div className="group-banner-content group-banner-single">
-          <button
-            className="btn arrow-back group-back-btn"
-            onClick={() => navigate("/grupos")}
-            aria-label="Atrás"
-          >
-            <svg
-              className="arrow-back-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <path
-                d="M15 6L9 12L15 18"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+          <button className="btn arrow-back group-back-btn" onClick={() => navigate("/grupos")} aria-label="Atrás">
+            <svg className="arrow-back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M15 6L9 12L15 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"/>
             </svg>
           </button>
 
@@ -1003,18 +952,14 @@ export default function GrupoDetalle() {
               <img className="avatar-img" src={avatarUrl} alt="Perfil" />
             ) : (
               <div className="avatar-fallback">
-                {(displayName || "U")
-                  .split(" ")
-                  .map(p => p[0])
-                  .join("")
-                  .slice(0, 2)
-                  .toUpperCase()}
+                {(displayName || "U").split(" ").map(p => p[0]).join("").slice(0, 2).toUpperCase()}
               </div>
             )}
           </button>
         </div>
       </div>
 
+      {/* --- PESTAÑAS (TABS) --- */}
       <div className="group-tabs">
         <button className={`group-tab ${tabActiva === "stream" ? "active" : ""}`} onClick={() => setTabActiva("stream")}>Stream</button>
         <button className={`group-tab ${tabActiva === "chat" ? "active" : ""}`} onClick={() => setTabActiva("chat")}>Chat</button>
@@ -1024,8 +969,12 @@ export default function GrupoDetalle() {
         <button className={`group-tab ${tabActiva === "ia" ? "active" : ""}`} onClick={() => setTabActiva("ia")}>✨ IA</button>
       </div>
 
+      {/* --- CONTENIDO DE PESTAÑAS --- */}
+      
+      {/* TAB: STREAM */}
       {tabActiva === "stream" && (
         <div className="group-tab-content">
+          
           {esAdmin && (
             <div className="card">
               <strong>Visibilidad del repositorio</strong>
@@ -1062,11 +1011,7 @@ export default function GrupoDetalle() {
                   />
                 ))}
               </div>
-              <button
-                className="btn btnPrimary"
-                onClick={manejarGuardarColorGrupo}
-                disabled={guardandoColorGrupo}
-              >
+              <button className="btn btnPrimary" onClick={manejarGuardarColorGrupo} disabled={guardandoColorGrupo}>
                 {guardandoColorGrupo ? "Guardando..." : "Guardar color"}
               </button>
             </div>
@@ -1115,6 +1060,7 @@ export default function GrupoDetalle() {
         </div>
       )}
 
+      {/* TAB: ARCHIVOS */}
       {tabActiva === "archivos" && (
         <div className="group-tab-content">
           {!userId ? (
@@ -1197,7 +1143,6 @@ export default function GrupoDetalle() {
                         Eliminar archivo
                       </button>
                     )}
-
                   </div>
                 </div>
               );
@@ -1207,6 +1152,7 @@ export default function GrupoDetalle() {
         </div>
       )}
 
+      {/* TAB: CHAT */}
       {tabActiva === "chat" && (
         <div className="group-tab-content">
           <div className="card chat-card">
@@ -1226,6 +1172,7 @@ export default function GrupoDetalle() {
               {cargandoMasChat && (
                 <div className="label" style={{ textAlign: "center" }}>Cargando mensajes...</div>
               )}
+              
               {mensajesChat.map(m => {
                 const esMio = m.user_id === userId;
                 const lectores = lecturasPorMensaje[m.id] || 0;
@@ -1233,12 +1180,9 @@ export default function GrupoDetalle() {
                 const avatar = avatarPorUsuario[m.user_id] || "";
                 const inicial = (m.display_name || "U").slice(0, 1).toUpperCase();
                 const idsLectores = lecturasIdsPorMensaje[m.id] || [];
-                const nombresLectores = idsLectores
-                  .map(id => miembrosPorId.get(id) || "Usuario")
-                  .filter(Boolean);
-                const tooltipLectores = nombresLectores.length
-                  ? `Leído por: ${nombresLectores.join(", ")}`
-                  : "";
+                const nombresLectores = idsLectores.map(id => miembrosPorId.get(id) || "Usuario").filter(Boolean);
+                const tooltipLectores = nombresLectores.length ? `Leído por: ${nombresLectores.join(", ")}` : "";
+                
                 return (
                   <div key={m.id} className={`chat-message ${esMio ? "own" : ""}`}>
                     <div className="chat-avatar">
@@ -1246,12 +1190,7 @@ export default function GrupoDetalle() {
                         <img
                           src={avatar}
                           alt=""
-                          onError={() =>
-                            setAvatarPorUsuario(prev => ({
-                              ...prev,
-                              [m.user_id]: ""
-                            }))
-                          }
+                          onError={() => setAvatarPorUsuario(prev => ({ ...prev, [m.user_id]: "" }))}
                         />
                       ) : (
                         <div className="chat-avatar-fallback">{inicial}</div>
@@ -1265,6 +1204,7 @@ export default function GrupoDetalle() {
                         </span>
                       </div>
                       <div className="chat-text">{m.mensaje}</div>
+                      
                       {esMio && otros > 0 && (
                         <div className="chat-read">
                           {lectores > 0 ? (
@@ -1285,6 +1225,7 @@ export default function GrupoDetalle() {
                   </div>
                 );
               })}
+              
               {mensajesChat.length === 0 && !cargandoChat && (
                 <div className="label">Aún no hay mensajes en este chat.</div>
               )}
@@ -1315,6 +1256,7 @@ export default function GrupoDetalle() {
         </div>
       )}
 
+      {/* TAB: PERSONAS */}
       {tabActiva === "people" && (
         <div className="group-tab-content">
           <div className="card">
@@ -1348,20 +1290,22 @@ export default function GrupoDetalle() {
         </div>
       )}
 
+      {/* TAB: TAREAS */}
       {tabActiva === "tareas" && (
         <div className="group-tab-content">
           <TaskMaster
-          esAdmin={esAdmin}
-          tareas={tareas}
-          totalMiembros={grupo?.miembros?.length || 0}
-          onAgregarTarea={handleAgregarTarea}
-          onToggleTarea={handleToggleTarea}
-          onEditarTarea={handleEditarTarea}
-          onBorrarTarea={handleBorrarTarea}
-        />
+            esAdmin={esAdmin}
+            tareas={tareas}
+            totalMiembros={grupo?.miembros?.length || 0}
+            onAgregarTarea={handleAgregarTarea}
+            onToggleTarea={handleToggleTarea}
+            onEditarTarea={handleEditarTarea}
+            onBorrarTarea={handleBorrarTarea}
+          />
         </div>
       )}
 
+      {/* TAB: IA */}
       {tabActiva === "ia" && (
         <div className="group-tab-content">
           <div className="card">
@@ -1422,6 +1366,7 @@ export default function GrupoDetalle() {
         </div>
       )}
 
+      {/* --- MODAL DE PERFIL DE USUARIO --- */}
       {mostrarPerfil && (
         <div className="modal-overlay" onClick={() => setMostrarPerfil(false)}>
           <div className="modal-content member-modal" onClick={e => e.stopPropagation()}>
@@ -1514,5 +1459,3 @@ export default function GrupoDetalle() {
     </div>
   );
 }
-
-  

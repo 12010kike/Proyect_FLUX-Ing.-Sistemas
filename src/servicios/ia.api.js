@@ -1,4 +1,24 @@
+/**
+ * ==========================================================================
+ * FLUX APP - SERVICIO DE INTELIGENCIA ARTIFICIAL (GEMINI)
+ * ==========================================================================
+ * Este archivo centraliza la comunicación con la API de Google Gemini.
+ * Gestiona el System Prompt, la limpieza de Markdown, las peticiones HTTP
+ * de texto plano y el procesamiento multimodal (lectura de archivos PDF/Imágenes
+ * desde Supabase Storage convertidos a Base64).
+ * * ÍNDICE:
+ * 1. CONSTANTES Y CONFIGURACIÓN (System Prompt)
+ * 2. HELPERS DE TEXTO Y CONEXIÓN
+ * 3. HELPERS DE STORAGE Y MULTIMODALIDAD
+ * 4. ENDPOINTS EXPORTADOS (Planificador, Resumen, Chat)
+ * ==========================================================================
+ */
+
 import { supabase } from "../config/supabaseClient";
+
+/* ==========================================================================
+   1. CONSTANTES Y CONFIGURACIÓN
+   ========================================================================== */
 
 const SYSTEM_PROMPT = `
 Eres FLUX IA, un asistente académico inteligente para estudiantes
@@ -29,8 +49,23 @@ FORMATO OBLIGATORIO — DEBES cumplir esto siempre:
 - Escribe en prosa natural con párrafos separados por líneas en blanco
 `;
 
-
 const DEFAULT_GEMINI_MODEL = "gemini-2.5-flash";
+
+// Tipos de archivo que Gemini puede leer nativamente como inlineData
+const MIME_SOPORTADOS_GEMINI = new Set([
+  "application/pdf",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/webp",
+  "image/heic",
+  "image/gif"
+]);
+
+
+/* ==========================================================================
+   2. HELPERS DE TEXTO Y CONEXIÓN BÁSICA
+   ========================================================================== */
 
 function getApiKey() {
   const key = import.meta.env.VITE_GEMINI_API_KEY;
@@ -42,7 +77,10 @@ function getModel() {
   return import.meta.env.VITE_GEMINI_MODEL || DEFAULT_GEMINI_MODEL;
 }
 
-// Elimina símbolos de Markdown de cualquier respuesta de la IA
+/**
+ * Elimina la sintaxis Markdown de la respuesta de la IA para presentar
+ * texto plano y limpio en la interfaz de usuario.
+ */
 function limpiarMarkdown(texto = "") {
   return texto
     // Negritas y cursivas: **texto**, *texto*, __texto__, _texto_
@@ -63,6 +101,9 @@ function limpiarMarkdown(texto = "") {
     .trim();
 }
 
+/**
+ * Realiza una petición estándar de texto (Prompt) a la API de Gemini.
+ */
 async function llamarGemini(userPrompt, { maxOutputTokens = 3000, temperature = 0.7 } = {}) {
   const apiKey = getApiKey();
   const model = getModel();
@@ -105,9 +146,146 @@ async function llamarGemini(userPrompt, { maxOutputTokens = 3000, temperature = 
   return limpiarMarkdown(texto);
 }
 
-// ─────────────────────────────────────────────────────────
-// Tab 1 – Planificador
-// ─────────────────────────────────────────────────────────
+
+/* ==========================================================================
+   3. HELPERS DE STORAGE Y MULTIMODALIDAD
+   ========================================================================== */
+
+/**
+ * Infiere el MIME type desde la extensión del archivo como fallback
+ * si la base de datos no lo proporciona.
+ */
+function inferirMimePorExtension(nombre = "") {
+  const ext = (nombre.split(".").pop() || "").toLowerCase();
+  const map = {
+    pdf:  "application/pdf",
+    png:  "image/png",
+    jpg:  "image/jpeg",
+    jpeg: "image/jpeg",
+    webp: "image/webp",
+    gif:  "image/gif",
+    heic: "image/heic"
+  };
+  return map[ext] || "";
+}
+
+/**
+ * Genera una URL firmada temporal de Supabase Storage 
+ * (Requerido para leer archivos si el bucket no es 100% público).
+ */
+async function obtenerUrlFirmada(path) {
+  if (!path) return null;
+  try {
+    const { data, error } = await supabase.storage
+      .from("Flux_repositorioGrupos")
+      .createSignedUrl(path, 120); // válida por 2 minutos
+      
+    if (error || !data?.signedUrl) {
+      console.error("[FLUX IA] Error creando URL firmada para", path, error);
+      return null;
+    }
+    return data.signedUrl;
+  } catch (e) {
+    console.error("[FLUX IA] Excepción en obtenerUrlFirmada:", e);
+    return null;
+  }
+}
+
+/**
+ * Descarga un archivo desde Supabase usando la URL firmada y lo convierte a Base64.
+ * Esencial para enviar documentos a Gemini a través del atributo `inlineData`.
+ */
+async function descargarComoBase64(path, mimeType) {
+  try {
+    const url = await obtenerUrlFirmada(path);
+    if (!url) return null;
+
+    const res = await fetch(url);
+    if (!res.ok) {
+      console.error("[FLUX IA] Fetch falló para", path, res.status, res.statusText);
+      return null;
+    }
+    
+    // Ignorar archivos mayores a 15 MB para evitar timeouts o bloqueos de la API
+    const contentLength = res.headers.get("content-length");
+    if (contentLength && parseInt(contentLength) > 15 * 1024 * 1024) {
+      console.warn("[FLUX IA] Archivo demasiado grande, omitiendo:", path);
+      return null;
+    }
+    
+    const buffer = await res.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    const chunks = [];
+    const CHUNK = 8192;
+    
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK)));
+    }
+    
+    console.log("[FLUX IA] Archivo descargado OK:", path, `(${(bytes.length / 1024).toFixed(1)} KB)`);
+    return { base64: btoa(chunks.join("")), mimeType };
+  } catch (e) {
+    console.error("[FLUX IA] Error descargando archivo:", path, e);
+    return null;
+  }
+}
+
+/**
+ * Llama a Gemini enviando un payload Multimodal (Texto + Archivos codificados en Base64).
+ */
+async function llamarGeminiMultimodal(parts, { maxOutputTokens = 6000, temperature = 0.6 } = {}) {
+  const apiKey = getApiKey();
+  const model = getModel();
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
+      contents: [{ parts }],
+      generationConfig: { maxOutputTokens, temperature }
+    })
+  });
+
+  if (!response.ok) {
+    const err = await response.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `Error al contactar la IA (${response.status})`);
+  }
+
+  const data = await response.json();
+  const candidate = data.candidates?.[0];
+
+  if (candidate?.finishReason === "MAX_TOKENS") {
+    console.warn("[FLUX IA] Resumen cortado por límite de tokens.");
+  }
+
+  // Gemini puede responder en múltiples partes: unir todo el texto
+  const texto = (candidate?.content?.parts || [])
+    .map(p => p.text || "")
+    .join("")
+    .trim();
+
+  if (!texto) {
+    // Diagnóstico detallado para detectar bloqueos de seguridad de Google
+    const razon = candidate?.finishReason || "sin candidatos";
+    const bloqueo = data.promptFeedback?.blockReason || "";
+    console.error("[FLUX IA] Respuesta vacía. finishReason:", razon, "blockReason:", bloqueo, data);
+    throw new Error(`La IA no pudo procesar los archivos (${razon || bloqueo || "respuesta vacía"}). Intenta de nuevo.`);
+  }
+
+  return limpiarMarkdown(texto);
+}
+
+
+/* ==========================================================================
+   4. ENDPOINTS EXPORTADOS (Funciones Principales de la IA)
+   ========================================================================== */
+
+/**
+ * TAB 1: Genera un plan de estudio estructurado basado en las tareas pendientes,
+ * el horario académico y las reglas (restricciones) del estudiante.
+ */
 export async function generarPlanEstudio({ tareas, horario, restricciones }) {
   const DIAS = ["Dom", "Lun", "Mar", "Mie", "Jue", "Vie", "Sab"];
 
@@ -159,136 +337,16 @@ Organiza la respuesta por días de la semana y asegúrate de cubrir todos los pu
   return llamarGemini(prompt, { maxOutputTokens: 4000 });
 }
 
-// ─────────────────────────────────────────────────────────
-// Tab 2 – Resumidor de Repositorio (con lectura de contenido)
-// ─────────────────────────────────────────────────────────
-
-// Tipos de archivo que Gemini puede leer como inlineData
-const MIME_SOPORTADOS_GEMINI = new Set([
-  "application/pdf",
-  "image/png",
-  "image/jpeg",
-  "image/jpg",
-  "image/webp",
-  "image/heic",
-  "image/gif"
-]);
-
-// Genera una URL firmada temporal de Supabase Storage (funciona aunque el bucket no sea 100% público)
-async function obtenerUrlFirmada(path) {
-  if (!path) return null;
-  try {
-    const { data, error } = await supabase.storage
-      .from("Flux_repositorioGrupos")
-      .createSignedUrl(path, 120); // válida por 2 minutos
-    if (error || !data?.signedUrl) {
-      console.error("[FLUX IA] Error creando URL firmada para", path, error);
-      return null;
-    }
-    return data.signedUrl;
-  } catch (e) {
-    console.error("[FLUX IA] Excepción en obtenerUrlFirmada:", e);
-    return null;
-  }
-}
-
-// Descarga un archivo desde Supabase y lo convierte a base64. Devuelve null si falla.
-async function descargarComoBase64(path, mimeType) {
-  try {
-    const url = await obtenerUrlFirmada(path);
-    if (!url) return null;
-
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error("[FLUX IA] Fetch falló para", path, res.status, res.statusText);
-      return null;
-    }
-    // Ignorar archivos mayores a 15 MB
-    const contentLength = res.headers.get("content-length");
-    if (contentLength && parseInt(contentLength) > 15 * 1024 * 1024) {
-      console.warn("[FLUX IA] Archivo demasiado grande, omitiendo:", path);
-      return null;
-    }
-    const buffer = await res.arrayBuffer();
-    const bytes = new Uint8Array(buffer);
-    const chunks = [];
-    const CHUNK = 8192;
-    for (let i = 0; i < bytes.length; i += CHUNK) {
-      chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK)));
-    }
-    console.log("[FLUX IA] Archivo descargado OK:", path, `(${(bytes.length / 1024).toFixed(1)} KB)`);
-    return { base64: btoa(chunks.join("")), mimeType };
-  } catch (e) {
-    console.error("[FLUX IA] Error descargando archivo:", path, e);
-    return null;
-  }
-}
-
-// Llama a Gemini con partes multimodales (texto + archivos en base64)
-async function llamarGeminiMultimodal(parts, { maxOutputTokens = 6000, temperature = 0.6 } = {}) {
-  const apiKey = getApiKey();
-  const model = getModel();
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      system_instruction: { parts: [{ text: SYSTEM_PROMPT }] },
-      contents: [{ parts }],
-      generationConfig: { maxOutputTokens, temperature }
-    })
-  });
-
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error(err?.error?.message || `Error al contactar la IA (${response.status})`);
-  }
-
-  const data = await response.json();
-  const candidate = data.candidates?.[0];
-
-  if (candidate?.finishReason === "MAX_TOKENS") {
-    console.warn("[FLUX IA] Resumen cortado por límite de tokens.");
-  }
-
-  // Gemini puede responder en múltiples partes: unir todo el texto
-  const texto = (candidate?.content?.parts || [])
-    .map(p => p.text || "")
-    .join("")
-    .trim();
-
-  if (!texto) {
-    // Diagnóstico para detectar el motivo real
-    const razon = candidate?.finishReason || "sin candidatos";
-    const bloqueo = data.promptFeedback?.blockReason || "";
-    console.error("[FLUX IA] Respuesta vacía. finishReason:", razon, "blockReason:", bloqueo, data);
-    throw new Error(`La IA no pudo procesar los archivos (${razon || bloqueo || "respuesta vacía"}). Intenta de nuevo.`);
-  }
-
-  return limpiarMarkdown(texto);
-}
-
-// Infiere el MIME type desde la extensión del archivo como fallback
-function inferirMimePorExtension(nombre = "") {
-  const ext = (nombre.split(".").pop() || "").toLowerCase();
-  const map = {
-    pdf:  "application/pdf",
-    png:  "image/png",
-    jpg:  "image/jpeg",
-    jpeg: "image/jpeg",
-    webp: "image/webp",
-    gif:  "image/gif",
-    heic: "image/heic"
-  };
-  return map[ext] || "";
-}
-
+/**
+ * TAB 2: Genera un resumen inteligente del Repositorio.
+ * Lee los archivos soportados (PDF, Imágenes) desde Supabase Storage, 
+ * los inyecta en el prompt y le pide a la IA que analice su contenido interno.
+ */
 export async function generarResumenRepositorio({ nombreRepo, archivos }) {
   const totalArchivos = archivos.length;
 
-  // ── Descargar contenido de PDFs e imágenes ──────────────────────────────
-  const MAX_ARCHIVOS_CON_CONTENIDO = 8;
+  // -- 1. Descargar contenido de PDFs e imágenes --
+  const MAX_ARCHIVOS_CON_CONTENIDO = 8; // Límite por rendimiento y cuota de tokens
   let archivosConContenido = 0;
 
   const archivosInfo = await Promise.all(
@@ -311,7 +369,7 @@ export async function generarResumenRepositorio({ nombreRepo, archivos }) {
     })
   );
 
-  // ── Construir el prompt de texto ────────────────────────────────────────
+  // -- 2. Construir el bloque de texto del Prompt --
   const archivosTexto = archivosInfo
     .map(({ nombre, mime, tamano, fecha, inlineData, indice }) => {
       const estado = inlineData
@@ -368,7 +426,7 @@ Cierre motivacional señalando los puntos más importantes del repositorio.
 
 ${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de archivos sería útil agregar." : ""}`;
 
-  // ── Construir partes multimodales (texto + archivos inline) ─────────────
+  // -- 3. Armar el payload Multimodal --
   const parts = [{ text: promptTexto }];
 
   for (const archivo of archivosInfo) {
@@ -379,13 +437,13 @@ ${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de arch
         data: archivo.inlineData.base64
       }
     });
-    // Etiqueta de contexto para que Gemini sepa qué archivo corresponde a cada inline
+    // Etiqueta de contexto para que Gemini identifique qué archivo pertenece a qué base64
     parts.push({ text: `[Archivo adjunto: "${archivo.nombre}"]` });
   }
 
   return llamarGeminiMultimodal(parts, { maxOutputTokens: 8000, temperature: 0.5 })
     .catch(errorMultimodal => {
-      // Si la llamada multimodal falla, reintentar solo con texto para garantizar una respuesta
+      // Fallback: Si el procesamiento multimodal falla (ej. timeout), reintenta analizando solo los nombres/metadatos
       console.warn("[FLUX IA] Llamada multimodal falló, reintentando sin archivos:", errorMultimodal.message);
       const promptFallback = promptTexto +
         "\n\n[NOTA INTERNA: Los archivos no pudieron procesarse en esta llamada. Analiza únicamente a partir de los nombres y tipos de archivo listados arriba.]";
@@ -393,9 +451,11 @@ ${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de arch
     });
 }
 
-// ─────────────────────────────────────────────────────────
-// Tab 3 – Chat libre
-// ─────────────────────────────────────────────────────────
+/**
+ * TAB 3: Conversación Libre con la IA.
+ * Envía a Gemini el historial de mensajes de ese chat específico junto con
+ * el contexto actual del estudiante (horarios, tareas, materias).
+ */
 export async function chatConIA({ mensajes, contextoUsuario }) {
   const { nombreUsuario, grupos, horario, tareasPendientes } = contextoUsuario;
 
@@ -406,7 +466,7 @@ export async function chatConIA({ mensajes, contextoUsuario }) {
     `📋 Tareas pendientes: ${tareasPendientes?.length > 0 ? tareasPendientes.join(", ") : "Sin tareas pendientes"}`
   ].join("\n");
 
-  // Solo incluir los últimos 20 mensajes para no saturar el contexto
+  // Limitar el historial a los últimos 20 mensajes para no superar la ventana de tokens de Gemini
   const historialReciente = mensajes.slice(-21, -1);
   const historialTexto = historialReciente
     .map(m => `${m.role === "user" ? "Estudiante" : "FLUX IA"}: ${m.text}`)

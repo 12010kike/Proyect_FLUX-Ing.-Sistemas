@@ -1,33 +1,61 @@
+/**
+ * COMPONENTE: DetallesRepositorio
+ * ----------------------------------------------------------------------
+ * Vista detallada de un repositorio o grupo.
+ * Permite a los usuarios (incluso si solo tienen permisos de lectura) ver la
+ * información del grupo, calificarlo (si es público), explorar los archivos 
+ * subidos y ver la lista de integrantes. Se divide en tres pestañas (Tabs).
+ */
+
+// ─── 1. IMPORTACIONES DE LIBRERÍAS ────────────────────────────────────────
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+
+// ─── 2. IMPORTACIONES LOCALES (API, Config, Utilidades, Componentes) ──────
 import {
   guardarCalificacionGrupoPublico,
   listarArchivosGrupoPorId,
   obtenerMiCalificacionGrupoPublico,
   obtenerPromedioGrupoPublico,
   obtenerRepositorioParaLecturaPorCodigo
-} from "../servicios/grupos.api";
-import { supabase } from "../config/supabaseClient";
-import { obtenerColorEntidad } from "../utils/groupColors";
-import "../estilos/flux.css";
-import Estrellas from "../components/Estrellas";
+} from "../../servicios/grupos.api"; 
+import { supabase } from "../../config/supabaseClient"; 
+import { obtenerColorEntidad } from "../../utils/groupColors"; 
+import "../../estilos/flux.css"; 
+import Estrellas from "../../components/Estrellas"; 
 
 export default function DetallesRepositorio() {
-  const { codigo } = useParams();
+  
+  // ─── 3. ESTADOS Y HOOKS DE NAVEGACIÓN ───────────────────────────────────
+  const { codigo } = useParams(); // Obtenemos el código del repo desde la URL
   const navigate = useNavigate();
+  
+  // ─── Datos del Repositorio
   const [grupo, setGrupo] = useState(null);
   const [archivos, setArchivos] = useState([]);
-  const [tab, setTab] = useState("info");
+  const [tab, setTab] = useState("info"); // Pestaña activa: "info", "archivos", o "people"
+  
+  // ─── Datos de Usuario / Sesión
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [userId, setUserId] = useState(null);
+  
+  // ─── Estados de Interfaz (UI)
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
-  const [userId, setUserId] = useState(null);
+  
+  // ─── Estados de Calificación (Ratings)
   const [ratingPromedio, setRatingPromedio] = useState(0);
   const [ratingTotal, setRatingTotal] = useState(0);
   const [miRating, setMiRating] = useState("");
   const [guardandoRating, setGuardandoRating] = useState(false);
   const [mensajeRating, setMensajeRating] = useState("");
 
+  // ─── 4. FUNCIONES AUXILIARES (HELPERS) ──────────────────────────────────
+  
+  /**
+   * Carga el promedio total de calificaciones y la calificación personal
+   * del usuario actual para este repositorio específico.
+   */
   async function cargarRatings(repoId) {
     if (!repoId) {
       setRatingPromedio(0);
@@ -40,21 +68,60 @@ export default function DetallesRepositorio() {
       obtenerPromedioGrupoPublico({ grupoId: repoId }),
       obtenerMiCalificacionGrupoPublico({ grupoId: repoId })
     ]);
+    
     setRatingPromedio(promedio?.ratingPromedio || 0);
     setRatingTotal(promedio?.ratingTotal || 0);
     setMiRating(miCalificacion !== null && miCalificacion !== undefined ? String(miCalificacion) : "");
   }
 
+  /**
+   * Guarda o actualiza la calificación del usuario para este repositorio.
+   */
+  async function manejarCalificar(valorNota) {
+    if (!grupo?.id || !grupo?.esPublico) return;
+    
+    if (!userId) {
+      setMensajeRating("Inicia sesión para calificar.");
+      return;
+    }
+    
+    const valor = Number(valorNota);
+    if (!Number.isFinite(valor)) return;
+
+    setGuardandoRating(true);
+    setMensajeRating("");
+    
+    try {
+      await guardarCalificacionGrupoPublico({ grupoId: grupo.id, rating: valor });
+      await cargarRatings(grupo.id); // Refresca los promedios tras calificar
+      setMensajeRating("Calificación guardada.");
+    } catch (e) {
+      setMensajeRating(`Error al guardar calificación: ${e.message}`);
+    } finally {
+      setGuardandoRating(false);
+    }
+  }
+
+  // ─── 5. EFECTOS (LIFECYCLE) ─────────────────────────────────────────────
+  
+  /**
+   * Efecto de inicialización:
+   * Carga toda la información del grupo, sus archivos, ratings y la sesión
+   * del usuario actual usando el código de la URL.
+   */
   useEffect(() => {
     (async () => {
       setCargando(true);
       setError("");
+      
       try {
         const g = await obtenerRepositorioParaLecturaPorCodigo(codigo);
         setGrupo(g);
+        
         if (g?.id) {
           const files = await listarArchivosGrupoPorId({ grupoId: g.id });
           setArchivos(files);
+          
           if (g.esPublico) {
             await cargarRatings(g.id);
           } else {
@@ -73,37 +140,21 @@ export default function DetallesRepositorio() {
         setGrupo(null);
         setArchivos([]);
       }
+      
+      // Obtener sesión del usuario
       const {
         data: { session }
       } = await supabase.auth.getSession();
+      
       setUserId(session?.user?.id || null);
       setAvatarUrl(session?.user?.user_metadata?.avatar_url?.trim() || "");
+      
       setCargando(false);
     })();
   }, [codigo]);
 
-  async function manejarCalificar(valorNota) {
-    if (!grupo?.id || !grupo?.esPublico) return;
-    if (!userId) {
-      setMensajeRating("Inicia sesión para calificar.");
-      return;
-    }
-    const valor = Number(valorNota);
-    if (!Number.isFinite(valor)) return;
-
-    setGuardandoRating(true);
-    setMensajeRating("");
-    try {
-      await guardarCalificacionGrupoPublico({ grupoId: grupo.id, rating: valor });
-      await cargarRatings(grupo.id);
-      setMensajeRating("Calificación guardada.");
-    } catch (e) {
-      setMensajeRating(`Error al guardar calificación: ${e.message}`);
-    } finally {
-      setGuardandoRating(false);
-    }
-  }
-
+  // ─── 6. RENDERIZADOS CONDICIONALES (Cargando / Errores) ─────────────────
+  
   if (cargando) {
     return (
       <div className="container">
@@ -128,12 +179,17 @@ export default function DetallesRepositorio() {
     );
   }
 
+  // ─── 7. PREPARACIÓN DE DATOS PARA RENDER ────────────────────────────────
+  
+  // Calcula los colores del banner basados en el ID/Código del grupo
   const colorGrupo = obtenerColorEntidad({
     tipo: "grupo",
     entidadId: grupo.id,
     identificador: grupo.codigo || grupo.nombre || grupo.id || "",
     colorId: grupo.color_id || ""
   });
+  
+  // Filtra la actividad del grupo para extraer solo los anuncios
   const anuncios = (grupo?.actividad || [])
     .filter(a => `${a.mensaje || ""}`.startsWith("ANUNCIO::"))
     .map(a => ({
@@ -141,25 +197,32 @@ export default function DetallesRepositorio() {
       texto: `${a.mensaje || ""}`.replace("ANUNCIO::", "")
     }));
 
+  // ─── 8. RENDERIZADO PRINCIPAL (JSX) ─────────────────────────────────────
   return (
     <div className="container">
+      
+      {/* ── BANNER SUPERIOR ── */}
       <div className="group-banner" style={{ "--banner-a": colorGrupo.a, "--banner-b": colorGrupo.b }}>
         <div className="group-banner-content group-banner-single">
+          
           <button className="btn arrow-back group-back-btn" onClick={() => navigate("/grupos")} aria-label="Atrás">
             <svg className="arrow-back-icon" viewBox="0 0 24 24" fill="none" aria-hidden="true">
               <path d="M15 6L9 12L15 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
+          
           <div className="group-banner-main">
             <div className="group-banner-title">{grupo.nombre}</div>
             <div className="group-banner-subtitle">Código: {grupo.codigo}</div>
           </div>
+          
           <button className="avatar-button home-avatar-lg" onClick={() => navigate("/perfil/editar")}>
             {avatarUrl ? <img className="avatar-img" src={avatarUrl} alt="Perfil" /> : <div className="avatar-fallback">U</div>}
           </button>
         </div>
       </div>
 
+      {/* ── NAVEGACIÓN POR PESTAÑAS (TABS) ── */}
       <div className="group-tabs">
         <button className={`group-tab ${tab === "info" ? "active" : ""}`} onClick={() => setTab("info")}>
           Info
@@ -172,12 +235,16 @@ export default function DetallesRepositorio() {
         </button>
       </div>
 
+      {/* ── PESTAÑA: INFO ── */}
       {tab === "info" && (
         <div className="group-tab-content" style={{ marginTop: 8 }}>
+          
+          {/* Tarjeta de Información General y Calificaciones */}
           <div className="card">
             <strong>{grupo.nombre}</strong>
             <div className="label" style={{ marginTop: 8 }}>Código: {grupo.codigo}</div>
             <div className="label">Visibilidad: {grupo.esPublico ? "Público" : "Privado"}</div>
+            
             {grupo.esPublico ? (
               <>
                 <div className="label">
@@ -203,6 +270,7 @@ export default function DetallesRepositorio() {
             )}
           </div>
 
+          {/* Tarjeta de Anuncios */}
           <div style={{ marginTop: 12 }}>
             <div className="card">
               <strong>Anuncios</strong>
@@ -229,15 +297,20 @@ export default function DetallesRepositorio() {
         </div>
       )}
 
+      {/* ── PESTAÑA: ARCHIVOS ── */}
       {tab === "archivos" && (
         <div className="group-tab-content">
           <div className="archivos-grid">
             {archivos.map((file, idx) => {
               const fullPath = file.path;
+              // Obtiene la URL pública desde Supabase Storage
               const { data } = supabase.storage.from("Flux_repositorioGrupos").getPublicUrl(fullPath);
               const nombre = file.nombre || fullPath?.split("/").pop() || "archivo";
               const extension = nombre.split(".").pop().toLowerCase();
+              
+              // Asigna icono dependiendo de la extensión
               const icono = extension === "pdf" ? "📄" : extension === "docx" ? "📝" : extension === "png" ? "🖼️" : "📎";
+              
               return (
                 <a key={`${file.id || idx}`} href={data.publicUrl} target="_blank" rel="noopener noreferrer" className="archivo-card archivo-link">
                   <div className="archivo-icon">{icono}</div>
@@ -248,11 +321,14 @@ export default function DetallesRepositorio() {
                 </a>
               );
             })}
+            
+            {/* Mensaje de estado vacío */}
             {!archivos.length && <p className="no-archivos">No hay archivos subidos aún.</p>}
           </div>
         </div>
       )}
 
+      {/* ── PESTAÑA: PEOPLE (INTEGRANTES) ── */}
       {tab === "people" && (
         <div className="group-tab-content">
           <div className="card">
@@ -273,6 +349,7 @@ export default function DetallesRepositorio() {
           </div>
         </div>
       )}
+      
     </div>
   );
 }

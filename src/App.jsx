@@ -1,22 +1,44 @@
+/**
+ * COMPONENTE PRINCIPAL: App
+ * ----------------------------------------------------------------------
+ * Enrutador central de la aplicación FLUX.
+ * Gestiona el estado de autenticación global mediante Supabase y define
+ * las reglas de acceso a rutas públicas, privadas y exclusivas de invitados.
+ */
+
+// ─── 1. IMPORTACIONES DE LIBRERÍAS ──────────────────────────────────────
 import { useEffect, useState } from "react";
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
+
+// ─── 2. IMPORTACIONES LOCALES (Configuración y Estilos) ─────────────────
 import { supabase } from "./config/supabaseClient"; // Importamos Supabase
 import "./App.css"; 
 import "./estilos/flux.css"; // Importamos los estilos globales de FLUX
 
-// Importamos las páginas
-import Registro from "./pages/Registro";
-import OlvideContrasena from "./pages/OlvideContrasena";
-import ResetPassword from "./pages/ResetPassword";
-import Home from "./pages/Home";
-import GrupoDetalle from "./pages/GrupoDetalle";
-import EditarPerfil from "./pages/EditarPerfil";
-import DetallesRepositorio from "./pages/DetallesRepositorio";
-import RepositorioPublicoDetalle from "./pages/RepositorioPublicoDetalle";
-import AsistenteIA from "./pages/AsistenteIA";
-import MetricasFundador from "./pages/MetricasFundador";
+// ─── 3. IMPORTACIONES DE PÁGINAS (Vistas) ───────────────────────────────
+// Autenticación
+import Registro from "./pages/Auth/Registro";
+import OlvideContrasena from "./pages/Auth/OlvideContrasena";
+import ResetPassword from "./pages/Auth/ResetPassword";
 
-// Bloquea rutas privadas: si no hay sesión, manda al login
+// Principal y Grupos/Repositorios
+import Home from "./pages/Home/Home";
+import GrupoDetalle from "./pages/Grupos/GrupoDetalle";
+import DetallesRepositorio from "./pages/Grupos/DetallesRepositorio";
+import RepositorioPublicoDetalle from "./pages/Grupos/RepositorioPublicoDetalle";
+
+// Perfiles y Herramientas Avanzadas
+import EditarPerfil from "./pages/Perfil/EditarPerfil";
+import MetricasFundador from "./pages/Perfil/MetricasFundador"; 
+import AsistenteIA from "./pages/IA/AsistenteIA";
+
+// ─── 4. GUARDIAS DE NAVEGACIÓN (ROUTE GUARDS) ───────────────────────────
+
+/**
+ * RequireAuth: Protege rutas privadas.
+ * Si el usuario NO tiene sesión, lo envía al Login y guarda la ruta
+ * que intentaba visitar para redirigirlo después de loguearse.
+ */
 function RequireAuth({ session, loading, children }) {
   const location = useLocation();
 
@@ -24,7 +46,6 @@ function RequireAuth({ session, loading, children }) {
   if (loading) {
     return (
       <div className="container">
-        {/* Estado de carga mientras se valida la sesión */}
         <div className="card">Cargando...</div>
       </div>
     );
@@ -32,14 +53,16 @@ function RequireAuth({ session, loading, children }) {
 
   // Usuario no autenticado: redirigir a login y guardar destino
   if (!session) {
-    // Usuario no autenticado: redirigir a login
     return <Navigate to="/auth" replace state={{ from: location }} />;
   }
 
   return children;
 }
 
-// Bloquea el login si ya hay sesión activa
+/**
+ * GuestOnly: Protege rutas exclusivas para visitantes (Login/Registro).
+ * Si el usuario YA tiene sesión, lo saca de ahí y lo manda al Home.
+ */
 function GuestOnly({ session, loading, children }) {
   const location = useLocation();
 
@@ -47,7 +70,6 @@ function GuestOnly({ session, loading, children }) {
   if (loading) {
     return (
       <div className="container">
-        {/* Estado de carga mientras se valida la sesión */}
         <div className="card">Cargando...</div>
       </div>
     );
@@ -55,7 +77,6 @@ function GuestOnly({ session, loading, children }) {
 
   // Si ya hay sesión, regresamos al destino original o al home
   if (session) {
-    // Usuario autenticado: evitar volver al login
     const destino = location.state?.from?.pathname || "/grupos";
     return <Navigate to={destino} replace />;
   }
@@ -63,11 +84,15 @@ function GuestOnly({ session, loading, children }) {
   return children;
 }
 
+// ─── 5. COMPONENTE PRINCIPAL (RUTAS) ────────────────────────────────────
+
 export default function App() {
+  
   // Estado global de autenticación
   const [session, setSession] = useState(null);
   const [loadingSession, setLoadingSession] = useState(true);
 
+  // Efecto: Manejo del ciclo de vida de la sesión de Supabase
   useEffect(() => {
     // 1) Revisar si ya había una sesión guardada al abrir la app
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -75,7 +100,7 @@ export default function App() {
       setLoadingSession(false);
     });
 
-    // 2) Escuchar cambios: login/logout/refresh de token
+    // 2) Escuchar cambios: login, logout, caducidad o refresh de token
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -86,14 +111,15 @@ export default function App() {
     return () => subscription.unsubscribe();
   }, []);
 
-  // Rutas públicas/privadas
+  // Árbol de Rutas
   return (
     <Routes>
+      
+      {/* ── Rutas de Autenticación (Solo Invitados) ── */}
       <Route
         path="/auth"
         element={
           <GuestOnly session={session} loading={loadingSession}>
-            {/* Pantalla de registro/login */}
             <Registro />
           </GuestOnly>
         }
@@ -106,41 +132,38 @@ export default function App() {
           </GuestOnly>
         }
       />
+      
+      {/* ── Ruta Pública/Mixta para reseteo ── */}
       <Route
         path="/auth/reset"
         element={<ResetPassword />}
       />
+
+      {/* ── Rutas Principales (Mixtas/Públicas dependiendo de permisos internos) ── */}
       <Route
         path="/grupos"
-        element={
-          <Home />
-        }
+        element={<Home />}
       />
       <Route
         path="/grupos/:codigo"
-        element={
-          <GrupoDetalle />
-        }
+        element={<GrupoDetalle />}
       />
+      <Route
+        path="/repos/:codigo"
+        element={<DetallesRepositorio />}
+      />
+      <Route
+        path="/repos-publicos/:id"
+        element={<RepositorioPublicoDetalle />}
+      />
+
+      {/* ── Rutas Privadas (Requieren Sesión Activa) ── */}
       <Route
         path="/perfil/editar"
         element={
           <RequireAuth session={session} loading={loadingSession}>
-            {/* Pantalla de edición de perfil */}
             <EditarPerfil />
           </RequireAuth>
-        }
-      />
-      <Route
-        path="/repos/:codigo"
-        element={
-          <DetallesRepositorio />
-        }
-      />
-      <Route
-        path="/repos-publicos/:id"
-        element={
-          <RepositorioPublicoDetalle />
         }
       />
       <Route
@@ -159,9 +182,11 @@ export default function App() {
           </RequireAuth>
         }
       />
-      {/* Redirecciones por defecto */}
+
+      {/* ── Redirecciones por defecto (Fallback) ── */}
       <Route path="/" element={<Navigate to="/grupos" replace />} />
       <Route path="*" element={<Navigate to="/grupos" replace />} />
+      
     </Routes>
   );
 }

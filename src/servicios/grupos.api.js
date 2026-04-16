@@ -1,5 +1,36 @@
+/**
+ * ==========================================================================
+ * FLUX APP - SERVICIO DE API (GRUPOS Y REPOSITORIOS)
+ * ==========================================================================
+ * Este archivo centraliza todas las consultas a la base de datos Supabase.
+ * * * ÍNDICE DE CONTENIDOS:
+ * 1. CONFIGURACIÓN Y CONSTANTES
+ * 2. HELPERS (UTILIDADES INTERNAS)
+ * 3. GESTIÓN DE GRUPOS PRIVADOS
+ * 4. GESTIÓN DE REPOSITORIOS PÚBLICOS
+ * 5. BÚSQUEDA GLOBAL
+ * 6. SISTEMA DE CALIFICACIONES (RATINGS)
+ * 7. GESTIÓN DE ARCHIVOS
+ * 8. COLABORADORES Y FAVORITOS
+ * 9. CHAT EN TIEMPO REAL (GRUPOS)
+ * 10. GESTOR DE TAREAS (TASK MASTER)
+ * 11. HISTORIAL DE CHAT (IA)
+ * 12. MÉTRICAS ADMINISTRATIVAS
+ * ==========================================================================
+ */
+
 import { supabase } from "../config/supabaseClient";
 import { validarNombreSinMalasPalabras } from "../utils/nameModeration";
+
+/* ==========================================================================
+   1. CONFIGURACIÓN Y CONSTANTES
+   ========================================================================== */
+
+const CHAT_TAG_REGEX = /^\[\[CHAT:([a-zA-Z0-9_-]+)\]\]\s*/;
+
+/* ==========================================================================
+   2. HELPERS (UTILIDADES INTERNAS)
+   ========================================================================== */
 
 function normalizarTexto(valor = "") {
   return `${valor}`
@@ -56,6 +87,99 @@ function mapearGrupo(grupo, miembros, actividad) {
   };
 }
 
+async function obtenerUsuarioActual() {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  return session?.user || null;
+}
+
+async function usuarioPuedeLeerGrupo({ grupoId, creadorId, esPublico, userId }) {
+  if (esPublico) return true;
+  if (!userId) return false;
+  if (creadorId && creadorId === userId) return true;
+
+  const { data: miembro, error: miembroError } = await supabase
+    .from("grupo_miembros")
+    .select("id")
+    .eq("grupo_id", grupoId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (miembroError) throw miembroError;
+  return Boolean(miembro);
+}
+
+function obtenerFechaDesdeFiltro(fechaFiltro = "all") {
+  const ahora = new Date();
+  const desde = new Date(ahora);
+
+  if (fechaFiltro === "1w") {
+    desde.setDate(desde.getDate() - 7);
+    return desde.toISOString();
+  }
+  if (fechaFiltro === "1m") {
+    desde.setMonth(desde.getMonth() - 1);
+    return desde.toISOString();
+  }
+  if (fechaFiltro === "3m") {
+    desde.setMonth(desde.getMonth() - 3);
+    return desde.toISOString();
+  }
+  if (fechaFiltro === "1y") {
+    desde.setFullYear(desde.getFullYear() - 1);
+    return desde.toISOString();
+  }
+
+  return null;
+}
+
+async function asegurarPropietarioRepositorioPublico({ repositorioId, userId }) {
+  const { data: repo, error: repoError } = await supabase
+    .from("repositorios_publicos")
+    .select("id, creador_id")
+    .eq("id", repositorioId)
+    .maybeSingle();
+  if (repoError) throw repoError;
+  if (!repo) throw new Error("Repositorio público no encontrado.");
+  if (!userId || repo.creador_id !== userId) {
+    throw new Error("Solo el creador puede modificar este repositorio.");
+  }
+  return repo;
+}
+
+async function esColaboradorRepositorioPublico({ repositorioId, userId }) {
+  if (!repositorioId || !userId) return false;
+  const { data, error } = await supabase
+    .from("repositorio_publico_colaboradores")
+    .select("id")
+    .eq("repositorio_id", repositorioId)
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data);
+}
+
+async function asegurarEditorRepositorioPublico({ repositorioId, userId }) {
+  const repo = await asegurarPropietarioRepositorioPublico({ repositorioId, userId }).catch(
+    () => null
+  );
+  if (repo) return repo;
+  const ok = await esColaboradorRepositorioPublico({ repositorioId, userId });
+  if (!ok) {
+    throw new Error("Solo el creador o colaboradores pueden modificar este repositorio.");
+  }
+  return { id: repositorioId, creador_id: null };
+}
+
+/* ==========================================================================
+   3. GESTIÓN DE GRUPOS PRIVADOS
+   ========================================================================== */
+
+/**
+ * Obtiene todos los grupos a los que pertenece el usuario autenticado.
+ */
 export async function listarGruposDelUsuario() {
   const {
     data: { session },
@@ -81,6 +205,9 @@ export async function listarGruposDelUsuario() {
     .filter(Boolean);
 }
 
+/**
+ * Crea un nuevo grupo, establece al creador como admin y registra la actividad inicial.
+ */
 export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false, colorId = "" }) {
   const {
     data: { session },
@@ -134,6 +261,9 @@ export async function crearGrupo({ nombreGrupo, nombreUsuario, esPublico = false
   return mapearGrupo(grupo, [miembro], [actividad]);
 }
 
+/**
+ * Obtiene los datos de un grupo usando su código único.
+ */
 export async function obtenerVistaPreviaPorCodigo(codigo) {
   const codigoNormalizado = codigo.trim().toUpperCase();
   const { data: grupo, error: errorGrupo } = await supabase
@@ -161,6 +291,48 @@ export async function obtenerVistaPreviaPorCodigo(codigo) {
   return mapearGrupo(grupo, miembros, actividad);
 }
 
+/**
+ * Obtiene la información de un grupo validando primero si el usuario tiene permisos de lectura.
+ */
+export async function obtenerRepositorioParaLecturaPorCodigo(codigo) {
+  const codigoNormalizado = codigo.trim().toUpperCase();
+  const { data: grupo, error: errorGrupo } = await supabase
+    .from("grupos")
+    .select("id, nombre, codigo, color_id, creador_id, es_publico")
+    .eq("codigo", codigoNormalizado)
+    .maybeSingle();
+  if (errorGrupo) throw errorGrupo;
+  if (!grupo) return null;
+
+  const user = await obtenerUsuarioActual();
+  const permitido = await usuarioPuedeLeerGrupo({
+    grupoId: grupo.id,
+    creadorId: grupo.creador_id,
+    esPublico: Boolean(grupo.es_publico),
+    userId: user?.id || null
+  });
+  if (!permitido) return null;
+
+  const { data: miembros, error: errorMiembros } = await supabase
+    .from("grupo_miembros")
+    .select("id, user_id, display_name, is_admin")
+    .eq("grupo_id", grupo.id)
+    .order("joined_at", { ascending: true });
+  if (errorMiembros) throw errorMiembros;
+
+  const { data: actividad, error: errorActividad } = await supabase
+    .from("grupo_actividad")
+    .select("mensaje, fecha, actor_id")
+    .eq("grupo_id", grupo.id)
+    .order("fecha", { ascending: false });
+  if (errorActividad) throw errorActividad;
+
+  return mapearGrupo(grupo, miembros, actividad);
+}
+
+/**
+ * Permite a un usuario unirse a un grupo usando el código único.
+ */
 export async function unirseAGrupoPorCodigo({ codigo, nombreUsuario }) {
   const codigoNormalizado = codigo.trim().toUpperCase();
 
@@ -232,13 +404,7 @@ export async function unirseAGrupoPorCodigo({ codigo, nombreUsuario }) {
   return mapearGrupo(grupo, miembros, actividad);
 }
 
-export async function actualizarNombreGrupo({
-  grupoId,
-  nombre,
-  actorId = null,
-  actorNombre = "",
-  nombreAnterior = ""
-}) {
+export async function actualizarNombreGrupo({ grupoId, nombre, actorId = null, actorNombre = "", nombreAnterior = "" }) {
   const nuevoNombre = validarNombreSinMalasPalabras(nombre, "El nombre del grupo");
   const { error } = await supabase
     .from("grupos")
@@ -246,28 +412,16 @@ export async function actualizarNombreGrupo({
     .eq("id", grupoId);
   if (error) throw error;
 
-  // Registro de actividad (best-effort): no bloqueamos el flujo si falla.
   if (actorId) {
     const mensaje = `RENOMBRE::${actorNombre || "Usuario"} cambió el nombre del grupo${nombreAnterior ? ` de "${nombreAnterior}"` : ""} a "${nuevoNombre}"`;
     const { error: actividadError } = await supabase
       .from("grupo_actividad")
-      .insert({
-        grupo_id: grupoId,
-        actor_id: actorId,
-        mensaje
-      });
-    if (actividadError) {
-      console.warn("No se pudo registrar actividad de renombre:", actividadError.message);
-    }
+      .insert({ grupo_id: grupoId, actor_id: actorId, mensaje });
+    if (actividadError) console.warn("No se pudo registrar actividad de renombre:", actividadError.message);
   }
 }
 
-export async function actualizarColorGrupo({
-  grupoId,
-  colorId,
-  actorId = null,
-  actorNombre = ""
-}) {
+export async function actualizarColorGrupo({ grupoId, colorId, actorId = null, actorNombre = "" }) {
   const {
     data: { session },
     error: sessionError
@@ -297,83 +451,12 @@ export async function actualizarColorGrupo({
     const mensaje = `COLOR::${actorNombre || "Usuario"} cambió el color del grupo.`;
     const { error: actividadError } = await supabase
       .from("grupo_actividad")
-      .insert({
-        grupo_id: grupoId,
-        actor_id: actorId,
-        mensaje
-      });
-    if (actividadError) {
-      console.warn("No se pudo registrar actividad de color:", actividadError.message);
-    }
+      .insert({ grupo_id: grupoId, actor_id: actorId, mensaje });
+    if (actividadError) console.warn("No se pudo registrar actividad de color:", actividadError.message);
   }
 }
 
-async function obtenerUsuarioActual() {
-  const {
-    data: { session },
-    error: sessionError
-  } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  return session?.user || null;
-}
-
-async function usuarioPuedeLeerGrupo({ grupoId, creadorId, esPublico, userId }) {
-  if (esPublico) return true;
-  if (!userId) return false;
-  if (creadorId && creadorId === userId) return true;
-
-  const { data: miembro, error: miembroError } = await supabase
-    .from("grupo_miembros")
-    .select("id")
-    .eq("grupo_id", grupoId)
-    .eq("user_id", userId)
-    .maybeSingle();
-  if (miembroError) throw miembroError;
-  return Boolean(miembro);
-}
-
-export async function obtenerRepositorioParaLecturaPorCodigo(codigo) {
-  const codigoNormalizado = codigo.trim().toUpperCase();
-  const { data: grupo, error: errorGrupo } = await supabase
-    .from("grupos")
-    .select("id, nombre, codigo, color_id, creador_id, es_publico")
-    .eq("codigo", codigoNormalizado)
-    .maybeSingle();
-  if (errorGrupo) throw errorGrupo;
-  if (!grupo) return null;
-
-  const user = await obtenerUsuarioActual();
-  const permitido = await usuarioPuedeLeerGrupo({
-    grupoId: grupo.id,
-    creadorId: grupo.creador_id,
-    esPublico: Boolean(grupo.es_publico),
-    userId: user?.id || null
-  });
-  if (!permitido) return null;
-
-  const { data: miembros, error: errorMiembros } = await supabase
-    .from("grupo_miembros")
-    .select("id, user_id, display_name, is_admin")
-    .eq("grupo_id", grupo.id)
-    .order("joined_at", { ascending: true });
-  if (errorMiembros) throw errorMiembros;
-
-  const { data: actividad, error: errorActividad } = await supabase
-    .from("grupo_actividad")
-    .select("mensaje, fecha, actor_id")
-    .eq("grupo_id", grupo.id)
-    .order("fecha", { ascending: false });
-  if (errorActividad) throw errorActividad;
-
-  return mapearGrupo(grupo, miembros, actividad);
-}
-
-export async function actualizarVisibilidadGrupo({
-  grupoId,
-  esPublico,
-  actorId = null,
-  actorNombre = ""
-}) {
+export async function actualizarVisibilidadGrupo({ grupoId, esPublico, actorId = null, actorNombre = "" }) {
   const valor = Boolean(esPublico);
   const { error } = await supabase
     .from("grupos")
@@ -385,14 +468,8 @@ export async function actualizarVisibilidadGrupo({
     const mensaje = `VISIBILIDAD::${actorNombre || "Usuario"} cambió la visibilidad del repositorio a ${valor ? "público" : "privado"}.`;
     const { error: actividadError } = await supabase
       .from("grupo_actividad")
-      .insert({
-        grupo_id: grupoId,
-        actor_id: actorId,
-        mensaje
-      });
-    if (actividadError) {
-      console.warn("No se pudo registrar actividad de visibilidad:", actividadError.message);
-    }
+      .insert({ grupo_id: grupoId, actor_id: actorId, mensaje });
+    if (actividadError) console.warn("No se pudo registrar actividad de visibilidad:", actividadError.message);
   }
 }
 
@@ -413,15 +490,6 @@ export async function eliminarGrupo({ grupoId }) {
   if (error) throw error;
 }
 
-export async function eliminarArchivoGrupo({ grupoId, path }) {
-  const { error } = await supabase
-    .from("grupo_archivos")
-    .delete()
-    .eq("grupo_id", grupoId)
-    .eq("path", path);
-  if (error) throw error;
-}
-
 export async function abandonarGrupo({ grupoId }) {
   const {
     data: { session },
@@ -430,7 +498,7 @@ export async function abandonarGrupo({ grupoId }) {
   if (sessionError) throw sessionError;
   const user = session?.user;
   if (!user) throw new Error("No hay sesion activa.");
-  // Leer datos del grupo y del miembro que abandona
+  
   const { data: grupo, error: grupoError } = await supabase
     .from("grupos")
     .select("id, creador_id")
@@ -448,7 +516,6 @@ export async function abandonarGrupo({ grupoId }) {
 
   const wasAdmin = Boolean(miembro?.is_admin);
 
-  // Eliminar la membresía del usuario
   const { error: deleteError } = await supabase
     .from("grupo_miembros")
     .delete()
@@ -456,7 +523,6 @@ export async function abandonarGrupo({ grupoId }) {
     .eq("user_id", user.id);
   if (deleteError) throw deleteError;
 
-  // Registrar actividad: el usuario abandonó el grupo
   try {
     const nombreSalida = miembro?.display_name || user.user_metadata?.display_name || "Usuario";
     await supabase.from("grupo_actividad").insert({
@@ -465,18 +531,15 @@ export async function abandonarGrupo({ grupoId }) {
       mensaje: `SALIDA::${nombreSalida} abandonó el grupo.`
     });
   } catch (actErr) {
-    // No crítico: sólo registrar en consola
     console.warn("No se pudo registrar actividad de salida:", actErr?.message || actErr);
   }
 
-  // Contar miembros restantes
   const { count, error: countError } = await supabase
     .from("grupo_miembros")
     .select("id", { count: "exact", head: true })
     .eq("grupo_id", grupoId);
   if (countError) throw countError;
 
-  // Si no quedan miembros, eliminar el grupo
   if (!count || count === 0) {
     const { error: deleteGroupError } = await supabase
       .from("grupos")
@@ -486,7 +549,6 @@ export async function abandonarGrupo({ grupoId }) {
     return;
   }
 
-  // Si el usuario que se fue era admin, asegurarse que exista al menos un admin
   if (wasAdmin) {
     const { data: otrosAdmins, error: adminsError } = await supabase
       .from("grupo_miembros")
@@ -496,9 +558,7 @@ export async function abandonarGrupo({ grupoId }) {
       .limit(1);
     if (adminsError) throw adminsError;
 
-    // Si ya hay otro admin, no hacemos nada
     if (!otrosAdmins || otrosAdmins.length === 0) {
-      // Promover al miembro con fecha de ingreso más antigua
       const { data: candidato, error: candidatoError } = await supabase
         .from("grupo_miembros")
         .select("id, user_id, display_name")
@@ -515,7 +575,6 @@ export async function abandonarGrupo({ grupoId }) {
           .eq("id", candidato.id);
         if (promoteError) throw promoteError;
 
-        // Registrar actividad: promoción de miembro a admin
         try {
           const nombrePromovido = candidato?.display_name || "Usuario";
           await supabase.from("grupo_actividad").insert({
@@ -527,7 +586,6 @@ export async function abandonarGrupo({ grupoId }) {
           console.warn("No se pudo registrar actividad de promoción:", actErr?.message || actErr);
         }
 
-        // Si el creador del grupo era quien se fue, transferir creador_id
         if (grupo && grupo.creador_id === user.id) {
           const { error: updateCreatorError } = await supabase
             .from("grupos")
@@ -540,6 +598,116 @@ export async function abandonarGrupo({ grupoId }) {
   }
 }
 
+/* ==========================================================================
+   4. GESTIÓN DE REPOSITORIOS PÚBLICOS
+   ========================================================================== */
+
+export async function crearRepositorioPublico({ titulo, creadorNombre = "", colorId = "" }) {
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  const nombre = `${creadorNombre || user.user_metadata?.display_name || "Usuario"}`.trim();
+  const tituloLimpio = validarNombreSinMalasPalabras(titulo, "El titulo del repositorio");
+
+  const { data, error } = await supabase
+    .from("repositorios_publicos")
+    .insert({
+      titulo: tituloLimpio,
+      creador_id: user.id,
+      creador_nombre: nombre,
+      color_id: colorId || null
+    })
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function obtenerRepositorioPublicoPorId(id) {
+  const repoId = `${id || ""}`.trim();
+  if (!repoId) return null;
+  const { data, error } = await supabase
+    .from("repositorios_publicos")
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
+    .eq("id", repoId)
+    .maybeSingle();
+  if (error) throw error;
+  return data || null;
+}
+
+export async function actualizarColorRepositorioPublico({ repositorioId, colorId }) {
+  const repoId = `${repositorioId || ""}`.trim();
+  if (!repoId) throw new Error("Repositorio inválido.");
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
+
+  const { data, error } = await supabase
+    .from("repositorios_publicos")
+    .update({ color_id: colorId || null })
+    .eq("id", repoId)
+    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function eliminarRepositorioPublico({ repositorioId }) {
+  const repoId = `${repositorioId || ""}`.trim();
+  if (!repoId) throw new Error("Repositorio inválido.");
+
+  const {
+    data: { session },
+    error: sessionError
+  } = await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = session?.user;
+  if (!user) throw new Error("No hay sesion activa.");
+
+  await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
+
+  const { data: archivos, error: archivosError } = await supabase
+    .from("repositorio_publico_archivos")
+    .select("path")
+    .eq("repositorio_id", repoId);
+  if (archivosError) throw archivosError;
+
+  const paths = (archivos || []).map(a => a.path).filter(Boolean);
+  if (paths.length) {
+    const { error: removeError } = await supabase.storage
+      .from("Flux_repositorioGrupos")
+      .remove(paths);
+    if (removeError) {
+      throw removeError;
+    }
+  }
+
+  const { error } = await supabase
+    .from("repositorios_publicos")
+    .delete()
+    .eq("id", repoId);
+  if (error) throw error;
+}
+
+/* ==========================================================================
+   5. BÚSQUEDA GLOBAL
+   ========================================================================== */
+
+/**
+ * Busca Repositorios Públicos y Grupos Públicos basándose en texto, fechas y calificaciones.
+ */
 export async function buscarRepositoriosPublicos(
   textoBusqueda,
   filtroFecha = "all",
@@ -738,6 +906,10 @@ export async function buscarRepositoriosPublicos(
     });
 }
 
+/* ==========================================================================
+   6. SISTEMA DE CALIFICACIONES (RATINGS)
+   ========================================================================== */
+
 function obtenerPromedioRating({ ratings, repositorioId }) {
   const lista = (ratings || []).filter(r => r.repo_id === repositorioId);
   if (!lista.length) {
@@ -769,44 +941,6 @@ function obtenerPromediosRatingGrupos(rows = []) {
     });
   }
   return resultado;
-}
-
-export async function crearRepositorioPublico({ titulo, creadorNombre = "", colorId = "" }) {
-  const {
-    data: { session },
-    error: sessionError
-  } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  const user = session?.user;
-  if (!user) throw new Error("No hay sesion activa.");
-
-  const nombre = `${creadorNombre || user.user_metadata?.display_name || "Usuario"}`.trim();
-  const tituloLimpio = validarNombreSinMalasPalabras(titulo, "El titulo del repositorio");
-
-  const { data, error } = await supabase
-    .from("repositorios_publicos")
-    .insert({
-      titulo: tituloLimpio,
-      creador_id: user.id,
-      creador_nombre: nombre,
-      color_id: colorId || null
-    })
-    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
-    .single();
-  if (error) throw error;
-  return data;
-}
-
-export async function obtenerRepositorioPublicoPorId(id) {
-  const repoId = `${id || ""}`.trim();
-  if (!repoId) return null;
-  const { data, error } = await supabase
-    .from("repositorios_publicos")
-    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
-    .eq("id", repoId)
-    .maybeSingle();
-  if (error) throw error;
-  return data || null;
 }
 
 export async function obtenerMiCalificacionRepositorioPublico({ repositorioId }) {
@@ -980,66 +1114,46 @@ export async function guardarCalificacionGrupoPublico({ grupoId, rating }) {
   if (insertError) throw insertError;
 }
 
-async function asegurarPropietarioRepositorioPublico({ repositorioId, userId }) {
-  const { data: repo, error: repoError } = await supabase
-    .from("repositorios_publicos")
-    .select("id, creador_id")
-    .eq("id", repositorioId)
+/* ==========================================================================
+   7. GESTIÓN DE ARCHIVOS
+   ========================================================================== */
+
+export async function listarArchivosGrupoPorId({ grupoId }) {
+  const { data: grupo, error: errorGrupo } = await supabase
+    .from("grupos")
+    .select("id, creador_id, es_publico")
+    .eq("id", grupoId)
     .maybeSingle();
-  if (repoError) throw repoError;
-  if (!repo) throw new Error("Repositorio público no encontrado.");
-  if (!userId || repo.creador_id !== userId) {
-    throw new Error("Solo el creador puede modificar este repositorio.");
+  if (errorGrupo) throw errorGrupo;
+  if (!grupo) return [];
+
+  const user = await obtenerUsuarioActual();
+  const permitido = await usuarioPuedeLeerGrupo({
+    grupoId: grupo.id,
+    creadorId: grupo.creador_id,
+    esPublico: Boolean(grupo.es_publico),
+    userId: user?.id || null
+  });
+  if (!permitido) {
+    throw new Error("No tienes permisos para ver este repositorio.");
   }
-  return repo;
-}
-
-export async function actualizarColorRepositorioPublico({ repositorioId, colorId }) {
-  const repoId = `${repositorioId || ""}`.trim();
-  if (!repoId) throw new Error("Repositorio inválido.");
-
-  const {
-    data: { session },
-    error: sessionError
-  } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  const user = session?.user;
-  if (!user) throw new Error("No hay sesion activa.");
-
-  await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
 
   const { data, error } = await supabase
-    .from("repositorios_publicos")
-    .update({ color_id: colorId || null })
-    .eq("id", repoId)
-    .select("id, titulo, creador_id, creador_nombre, color_id, created_at")
-    .single();
+    .from("grupo_archivos")
+    .select("id, path, nombre, mime_type, size_bytes, created_at")
+    .eq("grupo_id", grupoId)
+    .order("created_at", { ascending: false });
   if (error) throw error;
-  return data;
+  return data || [];
 }
 
-async function esColaboradorRepositorioPublico({ repositorioId, userId }) {
-  if (!repositorioId || !userId) return false;
-  const { data, error } = await supabase
-    .from("repositorio_publico_colaboradores")
-    .select("id")
-    .eq("repositorio_id", repositorioId)
-    .eq("user_id", userId)
-    .maybeSingle();
+export async function eliminarArchivoGrupo({ grupoId, path }) {
+  const { error } = await supabase
+    .from("grupo_archivos")
+    .delete()
+    .eq("grupo_id", grupoId)
+    .eq("path", path);
   if (error) throw error;
-  return Boolean(data);
-}
-
-async function asegurarEditorRepositorioPublico({ repositorioId, userId }) {
-  const repo = await asegurarPropietarioRepositorioPublico({ repositorioId, userId }).catch(
-    () => null
-  );
-  if (repo) return repo;
-  const ok = await esColaboradorRepositorioPublico({ repositorioId, userId });
-  if (!ok) {
-    throw new Error("Solo el creador o colaboradores pueden modificar este repositorio.");
-  }
-  return { id: repositorioId, creador_id: null };
 }
 
 export async function listarArchivosRepositorioPublico({ repositorioId }) {
@@ -1134,42 +1248,9 @@ export async function eliminarArchivoRepositorioPublico({ repositorioId, archivo
   if (error) throw error;
 }
 
-export async function eliminarRepositorioPublico({ repositorioId }) {
-  const repoId = `${repositorioId || ""}`.trim();
-  if (!repoId) throw new Error("Repositorio inválido.");
-
-  const {
-    data: { session },
-    error: sessionError
-  } = await supabase.auth.getSession();
-  if (sessionError) throw sessionError;
-  const user = session?.user;
-  if (!user) throw new Error("No hay sesion activa.");
-
-  await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
-
-  const { data: archivos, error: archivosError } = await supabase
-    .from("repositorio_publico_archivos")
-    .select("path")
-    .eq("repositorio_id", repoId);
-  if (archivosError) throw archivosError;
-
-  const paths = (archivos || []).map(a => a.path).filter(Boolean);
-  if (paths.length) {
-    const { error: removeError } = await supabase.storage
-      .from("Flux_repositorioGrupos")
-      .remove(paths);
-    if (removeError) {
-      throw removeError;
-    }
-  }
-
-  const { error } = await supabase
-    .from("repositorios_publicos")
-    .delete()
-    .eq("id", repoId);
-  if (error) throw error;
-}
+/* ==========================================================================
+   8. COLABORADORES Y FAVORITOS
+   ========================================================================== */
 
 export async function listarColaboradoresRepositorioPublico({ repositorioId }) {
   const repoId = `${repositorioId || ""}`.trim();
@@ -1242,7 +1323,6 @@ export async function eliminarColaboradorRepositorioPublico({ repositorioId, use
   const user = session?.user;
   if (!user) throw new Error("No hay sesion activa.");
 
-  // Solo creador puede expulsar colaboradores
   await asegurarPropietarioRepositorioPublico({ repositorioId: repoId, userId: user.id });
 
   const { error } = await supabase
@@ -1273,9 +1353,6 @@ export async function salirRepositorioPublico({ repositorioId }) {
   if (error) throw error;
 }
 
-// -----------------------------
-// Favoritos de repositorios
-// -----------------------------
 export async function listarRepositoriosFavoritos() {
   const {
     data: { session },
@@ -1401,93 +1478,10 @@ export async function listarRepositoriosDondeColaboro() {
   return data || [];
 }
 
-function obtenerFechaDesdeFiltro(fechaFiltro = "all") {
-  const ahora = new Date();
-  const desde = new Date(ahora);
+/* ==========================================================================
+   9. CHAT DE GRUPOS (TIEMPO REAL)
+   ========================================================================== */
 
-  if (fechaFiltro === "1w") {
-    desde.setDate(desde.getDate() - 7);
-    return desde.toISOString();
-  }
-  if (fechaFiltro === "1m") {
-    desde.setMonth(desde.getMonth() - 1);
-    return desde.toISOString();
-  }
-  if (fechaFiltro === "3m") {
-    desde.setMonth(desde.getMonth() - 3);
-    return desde.toISOString();
-  }
-  if (fechaFiltro === "1y") {
-    desde.setFullYear(desde.getFullYear() - 1);
-    return desde.toISOString();
-  }
-
-  return null;
-}
-
-export async function obtenerTotalesAdminHome({ fechaFiltro = "all" } = {}) {
-  const fechaDesde = obtenerFechaDesdeFiltro(fechaFiltro);
-  let gruposBuilder = supabase.from("grupos").select("id", { count: "exact", head: true });
-  let reposBuilder = supabase
-    .from("repositorios_publicos")
-    .select("id", { count: "exact", head: true });
-  let usuariosBuilder = supabase.from("profiles").select("id", { count: "exact", head: true });
-
-  if (fechaDesde) {
-    gruposBuilder = gruposBuilder.gte("created_at", fechaDesde);
-    reposBuilder = reposBuilder.gte("created_at", fechaDesde);
-    usuariosBuilder = usuariosBuilder.gte("created_at", fechaDesde);
-  }
-
-  const [gruposQuery, reposQuery, usuariosQuery] = await Promise.all([
-    gruposBuilder,
-    reposBuilder,
-    usuariosBuilder
-  ]);
-
-  if (gruposQuery.error) throw gruposQuery.error;
-  if (reposQuery.error) throw reposQuery.error;
-  if (usuariosQuery.error) throw usuariosQuery.error;
-
-  return {
-    totalGrupos: Number(gruposQuery.count || 0),
-    totalRepositorios: Number(reposQuery.count || 0),
-    totalUsuarios: Number(usuariosQuery.count || 0)
-  };
-}
-
-export async function listarArchivosGrupoPorId({ grupoId }) {
-  const { data: grupo, error: errorGrupo } = await supabase
-    .from("grupos")
-    .select("id, creador_id, es_publico")
-    .eq("id", grupoId)
-    .maybeSingle();
-  if (errorGrupo) throw errorGrupo;
-  if (!grupo) return [];
-
-  const user = await obtenerUsuarioActual();
-  const permitido = await usuarioPuedeLeerGrupo({
-    grupoId: grupo.id,
-    creadorId: grupo.creador_id,
-    esPublico: Boolean(grupo.es_publico),
-    userId: user?.id || null
-  });
-  if (!permitido) {
-    throw new Error("No tienes permisos para ver este repositorio.");
-  }
-
-  const { data, error } = await supabase
-    .from("grupo_archivos")
-    .select("id, path, nombre, mime_type, size_bytes, created_at")
-    .eq("grupo_id", grupoId)
-    .order("created_at", { ascending: false });
-  if (error) throw error;
-  return data || [];
-}
-
-// -----------------------------
-// Chat de grupos
-// -----------------------------
 async function asegurarMiembroGrupo({ grupoId, userId }) {
   if (!grupoId || !userId) throw new Error("Datos invalidos.");
   const { data, error } = await supabase
@@ -1575,7 +1569,9 @@ export async function marcarMensajesLeidos({ mensajeIds }) {
   if (error) throw error;
 }
 
-// TASK MASTER (Tareas de Grupo)
+/* ==========================================================================
+   10. GESTOR DE TAREAS (TASK MASTER)
+   ========================================================================== */
 
 export async function listarTareasGrupo(grupoId) {
   if (!grupoId) throw new Error("ID de grupo inválido.");
@@ -1636,11 +1632,9 @@ export async function eliminarTareaGrupo({ tareaId }) {
   if (error) throw error;
 }
 
-// -----------------------------
-// Historial de chat con IA
-// -----------------------------
-
-const CHAT_TAG_REGEX = /^\[\[CHAT:([a-zA-Z0-9_-]+)\]\]\s*/;
+/* ==========================================================================
+   11. HISTORIAL DE CHAT (IA)
+   ========================================================================== */
 
 function adjuntarTagChat(mensaje, chatId) {
   if (!chatId) return mensaje;
@@ -1689,6 +1683,7 @@ export async function listarHistorialChat() {
     .order("created_at", { ascending: false })
     .limit(200);
   if (error) throw error;
+  
   return (data || []).map(item => ({
     ...item,
     chat_id: extraerChatId(item.mensaje_usuario) || "legacy",
@@ -1716,4 +1711,39 @@ export async function eliminarHistorialChatPorId(chatId) {
 
   const { error } = await query;
   if (error) throw error;
+}
+
+/* ==========================================================================
+   12. MÉTRICAS ADMINISTRATIVAS
+   ========================================================================== */
+
+export async function obtenerTotalesAdminHome({ fechaFiltro = "all" } = {}) {
+  const fechaDesde = obtenerFechaDesdeFiltro(fechaFiltro);
+  let gruposBuilder = supabase.from("grupos").select("id", { count: "exact", head: true });
+  let reposBuilder = supabase
+    .from("repositorios_publicos")
+    .select("id", { count: "exact", head: true });
+  let usuariosBuilder = supabase.from("profiles").select("id", { count: "exact", head: true });
+
+  if (fechaDesde) {
+    gruposBuilder = gruposBuilder.gte("created_at", fechaDesde);
+    reposBuilder = reposBuilder.gte("created_at", fechaDesde);
+    usuariosBuilder = usuariosBuilder.gte("created_at", fechaDesde);
+  }
+
+  const [gruposQuery, reposQuery, usuariosQuery] = await Promise.all([
+    gruposBuilder,
+    reposBuilder,
+    usuariosBuilder
+  ]);
+
+  if (gruposQuery.error) throw gruposQuery.error;
+  if (reposQuery.error) throw reposQuery.error;
+  if (usuariosQuery.error) throw usuariosQuery.error;
+
+  return {
+    totalGrupos: Number(gruposQuery.count || 0),
+    totalRepositorios: Number(reposQuery.count || 0),
+    totalUsuarios: Number(usuariosQuery.count || 0)
+  };
 }

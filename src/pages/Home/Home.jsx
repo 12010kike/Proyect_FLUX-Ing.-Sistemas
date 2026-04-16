@@ -1,5 +1,21 @@
+/**
+ * COMPONENTE: Home (Dashboard Principal)
+ * ----------------------------------------------------------------------
+ * Vista central de la aplicación FLUX.
+ * Gestiona la carga de la sesión, muestra los grupos/repositorios del usuario,
+ * maneja el buscador global, notificaciones en tiempo real (Supabase Channels)
+ * y contiene la navegación principal (Drawer y Footer).
+ */
+
+// ─── 1. IMPORTACIONES ───────────────────────────────────────────────────
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { supabase } from "../../config/supabaseClient";
+import logoFlux from "../../assets/logo-flux.png";
+import { PALETA_BANNERS, obtenerColorEntidad } from "../../utils/groupColors";
+import "../../estilos/flux.css";
+
+// Endpoints / API Services
 import {
   abandonarGrupo,
   actualizarColorGrupo,
@@ -9,20 +25,13 @@ import {
   crearRepositorioPublico,
   listarGruposDelUsuario,
   obtenerVistaPreviaPorCodigo,
-  unirseAGrupoPorCodigo
-} from "../servicios/grupos.api";
-import {
+  unirseAGrupoPorCodigo,
   listarRepositoriosFavoritos,
   listarRepositoriosCreados,
   listarRepositoriosDondeColaboro
-} from "../servicios/grupos.api";
-import { supabase } from "../config/supabaseClient";
-import logoFlux from "../assets/logo-flux.png";
-import {
-  PALETA_BANNERS,
-  obtenerColorEntidad
-} from "../utils/groupColors";
+} from "../../servicios/grupos.api";
 
+// ─── 2. CONSTANTES DE CONFIGURACIÓN ─────────────────────────────────────
 const DIAS = [
   { value: 1, label: "Lun" },
   { value: 2, label: "Mar" },
@@ -51,7 +60,33 @@ const RATING_OPTIONS = [
 
 export default function Home() {
   const navigate = useNavigate();
+
+  // ─── 3. ESTADOS LOCALES Y REFERENCIAS ──────────────────────────────────
+  
+  // -- Sesión y Usuario
+  const [tieneSesion, setTieneSesion] = useState(false);
+  const [userId, setUserId] = useState(null);
   const [nombreUsuario, setNombreUsuario] = useState("");
+  const [avatarUrl, setAvatarUrl] = useState("");
+  const [esFundadorVista, setEsFundadorVista] = useState(false);
+  const [horario, setHorario] = useState([]);
+  
+  // -- Datos del Dashboard (Listas)
+  const [gruposUsuario, setGruposUsuario] = useState([]);
+  const [misReposCreados, setMisReposCreados] = useState([]);
+  const [reposColaborando, setReposColaborando] = useState([]);
+  const [favoritosRepos, setFavoritosRepos] = useState([]);
+  
+  // -- Buscador y Filtros
+  const [busquedaAbierta, setBusquedaAbierta] = useState(false);
+  const [busquedaTexto, setBusquedaTexto] = useState("");
+  const [filtroFechaRepos, setFiltroFechaRepos] = useState("all");
+  const [filtroRatingRepos, setFiltroRatingRepos] = useState("all");
+  const [reposSugeridos, setReposSugeridos] = useState([]);
+  const [buscandoRepos, setBuscandoRepos] = useState(false);
+  
+  // -- Formularios: Crear/Unirse (Modales)
+  const [accionAbierta, setAccionAbierta] = useState(""); // "crear" | "crearRepoPublico" | "unirse"
   const [codigoIngreso, setCodigoIngreso] = useState("");
   const [nombreGrupo, setNombreGrupo] = useState("");
   const [esPublicoNuevoGrupo, setEsPublicoNuevoGrupo] = useState(false);
@@ -59,37 +94,27 @@ export default function Home() {
   const [tituloRepoPublico, setTituloRepoPublico] = useState("");
   const [colorNuevoRepo, setColorNuevoRepo] = useState(PALETA_BANNERS[0].id);
   const [vistaPrevia, setVistaPrevia] = useState(null);
-  const [error, setError] = useState("");
-  const [gruposUsuario, setGruposUsuario] = useState([]);
-  const [avatarUrl, setAvatarUrl] = useState("");
-  const [horario, setHorario] = useState([]);
-  const [mostrarToast, setMostrarToast] = useState(false);
-  const [toastMensaje, setToastMensaje] = useState("");
-  const [toastGrupoId, setToastGrupoId] = useState(null);
-  const [userId, setUserId] = useState(null);
-  const [menuAbierto, setMenuAbierto] = useState(false);
-  const [fabAbierto, setFabAbierto] = useState(false);
-  const [accionAbierta, setAccionAbierta] = useState("");
-  const [busquedaAbierta, setBusquedaAbierta] = useState(false);
-  const [busquedaTexto, setBusquedaTexto] = useState("");
-  const [filtroFechaRepos, setFiltroFechaRepos] = useState("all");
-  const [filtroRatingRepos, setFiltroRatingRepos] = useState("all");
-  const [reposSugeridos, setReposSugeridos] = useState([]);
-  const [buscandoRepos, setBuscandoRepos] = useState(false);
-  const [favoritosRepos, setFavoritosRepos] = useState([]);
-  const [misReposCreados, setMisReposCreados] = useState([]);
-  const [reposColaborando, setReposColaborando] = useState([]);
-  const [esFundadorVista, setEsFundadorVista] = useState(false);
-  const [menuGrupoAbiertoId, setMenuGrupoAbiertoId] = useState(null);
+  
+  // -- Formularios: Editar Grupo
   const [grupoEditando, setGrupoEditando] = useState(null);
   const [nuevoNombreGrupoEditar, setNuevoNombreGrupoEditar] = useState("");
   const [colorGrupoEditar, setColorGrupoEditar] = useState(PALETA_BANNERS[0].id);
-  const [tieneSesion, setTieneSesion] = useState(false);
+  
+  // -- Interfaz de Usuario (UI)
+  const [error, setError] = useState("");
+  const [menuAbierto, setMenuAbierto] = useState(false); // Drawer
+  const [fabAbierto, setFabAbierto] = useState(false); // Floating Action Button
+  const [menuGrupoAbiertoId, setMenuGrupoAbiertoId] = useState(null); // Menú Kebab en las cards
+  
+  // -- Sistema de Notificaciones (Toasts)
+  const [mostrarToast, setMostrarToast] = useState(false);
+  const [toastMensaje, setToastMensaje] = useState("");
+  const [toastGrupoId, setToastGrupoId] = useState(null);
   const toastTimeoutRef = useRef(null);
-  const fechaFiltroLabel =
-    FECHA_OPTIONS.find(o => o.value === filtroFechaRepos)?.label || "Sin filtro de fecha";
-  const ratingFiltroLabel =
-    RATING_OPTIONS.find(o => o.value === filtroRatingRepos)?.label || "Sin filtro de puntuación";
+
+  // ─── 4. DATOS COMPUTADOS (MEMOS) ───────────────────────────────────────
+  const fechaFiltroLabel = FECHA_OPTIONS.find(o => o.value === filtroFechaRepos)?.label || "Sin filtro de fecha";
+  const ratingFiltroLabel = RATING_OPTIONS.find(o => o.value === filtroRatingRepos)?.label || "Sin filtro de puntuación";
 
   const resumenHorario = useMemo(() => {
     if (!horario.length) return "Sin horario";
@@ -122,29 +147,7 @@ export default function Home() {
       }));
   }, [horario]);
 
-  useEffect(() => {
-    if (!busquedaAbierta) return;
-    const q = busquedaTexto.trim();
-    if (!q && filtroFechaRepos === "all" && filtroRatingRepos === "all") {
-      setReposSugeridos([]);
-      return;
-    }
-
-    const timer = setTimeout(async () => {
-      try {
-        setBuscandoRepos(true);
-        const resultados = await buscarRepositoriosPublicos(q, filtroFechaRepos, filtroRatingRepos);
-        setReposSugeridos(resultados);
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setBuscandoRepos(false);
-      }
-    }, 220);
-
-    return () => clearTimeout(timer);
-  }, [busquedaAbierta, busquedaTexto, filtroFechaRepos, filtroRatingRepos]);
-
+  // ─── 5. FUNCIONES DE CARGA DE DATOS (FETCH) ────────────────────────────
   async function cargarGrupos(userIdActual = userId) {
     try {
       if (!userIdActual) {
@@ -188,6 +191,9 @@ export default function Home() {
     }
   }
 
+  // ─── 6. EFECTOS (LIFECYCLE & REALTIME) ─────────────────────────────────
+
+  // Efecto Principal: Cargar Contexto Inicial del Usuario
   useEffect(() => {
     let isMounted = true;
 
@@ -211,25 +217,24 @@ export default function Home() {
         }
         return;
       }
+      
       setTieneSesion(true);
       const displayName = user?.user_metadata?.display_name?.trim();
       const avatar = user?.user_metadata?.avatar_url?.trim();
+      
       const { data: bloquesData, error: bloquesError } = await supabase
         .from("bloques_horario")
         .select("id, day_of_week, start_time, end_time, type")
         .eq("user_id", user?.id);
+        
       const { data: perfilData, error: perfilError } = await supabase
         .from("profiles")
         .select("is_fundador")
         .eq("id", user?.id)
         .maybeSingle();
 
-      if (bloquesError) {
-        setError("No se pudo cargar el horario.");
-      }
-      if (perfilError) {
-        console.warn("No se pudo cargar el perfil de fundador:", perfilError.message);
-      }
+      if (bloquesError) setError("No se pudo cargar el horario.");
+      if (perfilError) console.warn("No se pudo cargar el perfil de fundador:", perfilError.message);
 
       if (isMounted) {
         setNombreUsuario(displayName || "");
@@ -259,7 +264,31 @@ export default function Home() {
     };
   }, []);
 
-  // Real-time: cuando el usuario se une/abandona grupos, recargar lista automáticamente
+  // Efecto Buscador: Búsqueda con "Debounce" (Evita saturar la base de datos al teclear rápido)
+  useEffect(() => {
+    if (!busquedaAbierta) return;
+    const q = busquedaTexto.trim();
+    if (!q && filtroFechaRepos === "all" && filtroRatingRepos === "all") {
+      setReposSugeridos([]);
+      return;
+    }
+
+    const timer = setTimeout(async () => {
+      try {
+        setBuscandoRepos(true);
+        const resultados = await buscarRepositoriosPublicos(q, filtroFechaRepos, filtroRatingRepos);
+        setReposSugeridos(resultados);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setBuscandoRepos(false);
+      }
+    }, 220);
+
+    return () => clearTimeout(timer);
+  }, [busquedaAbierta, busquedaTexto, filtroFechaRepos, filtroRatingRepos]);
+
+  // Real-time: Recargar lista de grupos si se une/abandona uno
   useEffect(() => {
     if (!userId) return;
     const channel = supabase
@@ -273,7 +302,6 @@ export default function Home() {
           filter: `user_id=eq.${userId}`
         },
         async payload => {
-          // recargar grupos cuando cambian membresías
           cargarGrupos();
           try {
             const ev = payload?.event;
@@ -294,7 +322,6 @@ export default function Home() {
                 }
               }
             } else if (ev === "DELETE") {
-              // opcional: notificar que salió del grupo
               const gid = payload?.old?.grupo_id;
               if (gid) {
                 setToastMensaje(`Has salido de un grupo`);
@@ -315,7 +342,7 @@ export default function Home() {
     };
   }, [userId]);
 
-  // Real-time: cuando cambian colaboraciones del usuario, recargar repos colaborando.
+  // Real-time: Recargar repositorios colaborando
   useEffect(() => {
     if (!userId) return;
     const chan = supabase
@@ -339,6 +366,7 @@ export default function Home() {
     };
   }, [userId]);
 
+  // Real-time: Notificaciones (Toasts) de actividad en grupos
   useEffect(() => {
     if (!gruposUsuario.length) return;
 
@@ -377,7 +405,7 @@ export default function Home() {
     };
   }, [gruposUsuario, userId]);
 
-  // Real-time: cuando el usuario crea/elimina repositorios públicos creados por él, recargar
+  // Real-time: Recargar repos públicos creados
   useEffect(() => {
     if (!userId) return;
     const chan = supabase
@@ -401,6 +429,7 @@ export default function Home() {
     };
   }, [userId]);
 
+  // Efecto UI: Manejo del Kebab Menu (Cerrar al hacer clic fuera o Escape)
   useEffect(() => {
     if (!menuGrupoAbiertoId) return;
 
@@ -424,11 +453,14 @@ export default function Home() {
     };
   }, [menuGrupoAbiertoId]);
 
+  // Efecto UI: Limpiar errores al cerrar modales
   useEffect(() => {
     if (!accionAbierta && !grupoEditando) {
       setError("");
     }
   }, [accionAbierta, grupoEditando]);
+
+  // ─── 7. FUNCIONES DE INTERACCIÓN (HANDLERS) ────────────────────────────
 
   async function manejarCambioCodigo(valor) {
     const codigo = valor.toUpperCase();
@@ -554,8 +586,11 @@ export default function Home() {
     }
   }
 
+  // ─── 8. RENDERIZADO PRINCIPAL (JSX) ────────────────────────────────────
   return (
     <div className="container home-container">
+      
+      {/* ─── TOASTS DE NOTIFICACIÓN ─── */}
       {mostrarToast && (
         <button
           className="toast-noti toast-action"
@@ -569,6 +604,7 @@ export default function Home() {
         </button>
       )}
 
+      {/* ─── ENCABEZADO SUPERIOR (Topbar) ─── */}
       <div className="home-header-strip">
         <button
           className="menu-button menu-button-primary"
@@ -578,11 +614,12 @@ export default function Home() {
           ☰
         </button>
         <div className="home-header-title-wrap">
-                    <div className="home-header-title">FLUX</div>
+          <div className="home-header-title">FLUX</div>
           <div className="logoDot home-header-dot" />
         </div>
       </div>
 
+      {/* ─── SECCIÓN: MIS REPOSITORIOS CREADOS ─── */}
       {misReposCreados && misReposCreados.length > 0 && (
         <div className="card" style={{ marginBottom: 12 }}>
           <strong>Mis repositorios</strong>
@@ -616,6 +653,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── SECCIÓN: REPOSITORIOS DONDE COLABORO ─── */}
       {reposColaborando && reposColaborando.length > 0 && (
         <div className="card" style={{ marginBottom: 12 }}>
           <strong>Colaborando</strong>
@@ -649,6 +687,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── SECCIÓN: REPOSITORIOS FAVORITOS ─── */}
       {favoritosRepos && favoritosRepos.length > 0 && (
         <div className="card" style={{ marginBottom: 12 }}>
           <strong>Favoritos</strong>
@@ -682,6 +721,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── SECCIÓN: MIS GRUPOS PRIVADOS ─── */}
       {gruposUsuario && gruposUsuario.length > 0 ? (
         <div className="card" style={{ marginBottom: 12 }}>
           <strong>Mis grupos</strong>
@@ -769,10 +809,11 @@ export default function Home() {
         </div>
       ) : (
         <div className="classroom-grid">
-          {/* empty grid when no groups - message handled below */}
+          {/* Grilla vacía si no hay grupos */}
         </div>
       )}
 
+      {/* ─── ESTADO VACÍO (Sin Grupos / Sin Sesión) ─── */}
       {gruposUsuario.length === 0 && (
         <div className="card" style={{ marginTop: 16 }}>
           {tieneSesion ? (
@@ -841,6 +882,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── DRAWER (MENÚ LATERAL IZQUIERDO) ─── */}
       <>
         <div
           className={`drawer-overlay ${menuAbierto ? "open" : ""}`}
@@ -929,6 +971,7 @@ export default function Home() {
         </aside>
       </>
 
+      {/* ─── MENÚ FLOANTE ACCIONES (FAB) ─── */}
       {fabAbierto && tieneSesion && (
         <div className="footer-plus-menu">
           <button
@@ -964,6 +1007,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── FOOTER MÓVIL ─── */}
       <footer className="home-footer" style={{ justifyContent: "space-evenly" }}>
         <button
           className="home-footer-btn"
@@ -1033,6 +1077,7 @@ export default function Home() {
         </button>
       </footer>
 
+      {/* ─── MODAL ACCIONES (Crear/Unirse) ─── */}
       {accionAbierta && (
         <div className="modal-overlay" onClick={() => {
           setError("");
@@ -1139,6 +1184,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── MODAL EDITAR GRUPO ─── */}
       {grupoEditando && (
         <div className="modal-overlay" onClick={() => setGrupoEditando(null)}>
           <div className="modal-content action-modal" onClick={e => e.stopPropagation()}>
@@ -1179,6 +1225,7 @@ export default function Home() {
         </div>
       )}
 
+      {/* ─── MODAL BUSCADOR ─── */}
       {busquedaAbierta && (
         <div className="modal-overlay" onClick={() => setBusquedaAbierta(false)}>
           <div className="modal-content action-modal" onClick={e => e.stopPropagation()}>
@@ -1221,6 +1268,7 @@ export default function Home() {
                   </select>
                 </div>
               </details>
+              
               <div className="repo-suggest-list" style={{ marginTop: 12 }}>
                 {reposSugeridos.map(repo => {
                   const color = obtenerColorEntidad({
@@ -1295,5 +1343,3 @@ export default function Home() {
     </div>
   );
 }
-
-

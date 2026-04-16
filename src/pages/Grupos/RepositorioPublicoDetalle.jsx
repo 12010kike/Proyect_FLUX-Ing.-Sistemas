@@ -1,5 +1,17 @@
+/**
+ * COMPONENTE: RepositorioPublicoDetalle
+ * ----------------------------------------------------------------------
+ * Vista detallada para un repositorio público.
+ * Permite ver la información del repositorio, subir y descargar archivos,
+ * gestionar colaboradores, interactuar con IA para resúmenes y unirse 
+ * mediante un enlace o código QR.
+ */
+
+// ─── 1. IMPORTACIONES DE LIBRERÍAS ────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams, useLocation } from "react-router-dom";
+
+// ─── 2. IMPORTACIONES LOCALES (API, Utils, Componentes) ───────────────────
 import {
   eliminarRepositorioPublico,
   eliminarArchivoRepositorioPublico,
@@ -16,67 +28,126 @@ import {
   subirArchivoRepositorioPublico,
   toggleFavoritoRepositorio,
   isRepositorioFavorito
-} from "../servicios/grupos.api";
-import { supabase } from "../config/supabaseClient";
-import Estrellas from "../components/Estrellas";
-import ModalQR from "../components/ModalQR"; 
-import ConfirmModal from "../components/ConfirmModal";
-import { generarResumenRepositorio } from "../servicios/ia.api";
+} from "../../servicios/grupos.api";
+import { generarResumenRepositorio } from "../../servicios/ia.api";
+import { supabase } from "../../config/supabaseClient";
 import {
   PALETA_BANNERS,
   guardarColorGuardado,
   obtenerColorEntidad,
   obtenerColorGuardado
-} from "../utils/groupColors";
-import "../estilos/flux.css";
+} from "../../utils/groupColors";
+import "../../estilos/flux.css";
+
+// Componentes de Interfaz
+import Estrellas from "../../components/Estrellas";
+import ModalQR from "../../components/ModalQR"; 
+import ConfirmModal from "../../components/ConfirmModal";
 
 export default function RepositorioPublicoDetalle() {
+  
+  // ─── 3. ESTADOS Y HOOKS DE NAVEGACIÓN ───────────────────────────────────
   const { id } = useParams();
   const navigate = useNavigate();
-  const location = useLocation(); // <- Aquí atrapamos la URL de React
+  const location = useLocation(); // Atrapamos la URL actual para detectar invitaciones
+
+  // -- Estados del Repositorio y Sesión
   const [repo, setRepo] = useState(null);
-  const [archivos, setArchivos] = useState([]);
+  const [userId, setUserId] = useState(null);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState("");
+  const [tabActiva, setTabActiva] = useState("info");
+  
+  // -- Estados de Roles e Interacción
   const [isFavorito, setIsFavorito] = useState(false);
-  const [actividad, setActividad] = useState([]);
+  const [esCreador, setEsCreador] = useState(false);
+  const [esColaborador, setEsColaborador] = useState(false);
+  const esEditor = esCreador || esColaborador; // Variable computada
+
+  // -- Estados de Contenido (Archivos, Colaboradores, Actividad)
+  const [archivos, setArchivos] = useState([]);
   const [archivosSeleccionados, setArchivosSeleccionados] = useState([]);
+  const [actividad, setActividad] = useState([]);
+  const [colaboradores, setColaboradores] = useState([]);
+  const [emailColaborador, setEmailColaborador] = useState("");
   const [nuevoAnuncio, setNuevoAnuncio] = useState("");
+  
+  // -- Estados de UI y Mensajes
   const [subiendo, setSubiendo] = useState(false);
   const [mensaje, setMensaje] = useState("");
   const [mensajeColaboradores, setMensajeColaboradores] = useState("");
-  const [esCreador, setEsCreador] = useState(false);
-  const [esColaborador, setEsColaborador] = useState(false);
-  const [colaboradores, setColaboradores] = useState([]);
-  const [emailColaborador, setEmailColaborador] = useState("");
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState("");
-  const [userId, setUserId] = useState(null);
+  const [mostrarConfirmEliminar, setMostrarConfirmEliminar] = useState(false);
+  const [colorRepoSeleccionado, setColorRepoSeleccionado] = useState(PALETA_BANNERS[0].id);
+  const inputRef = useRef(null);
+
+  // -- Estados de Calificación (Ratings)
   const [ratingPromedio, setRatingPromedio] = useState(0);
   const [ratingTotal, setRatingTotal] = useState(0);
   const [miRating, setMiRating] = useState("");
   const [guardandoRating, setGuardandoRating] = useState(false);
-  const [colorRepoSeleccionado, setColorRepoSeleccionado] = useState(PALETA_BANNERS[0].id);
-  const [mostrarConfirmEliminar, setMostrarConfirmEliminar] = useState(false);
-  
-  // ESTADOS PARA IA Y PREVIEWS (De Enrique)
+
+  // -- Estados de Inteligencia Artificial
   const [iaGenerando, setIaGenerando] = useState(false);
   const [iaError, setIaError] = useState("");
   const [iaResumen, setIaResumen] = useState("");
-  // ESTADOS PARA EL QR Y LA INVITACIÓN (Tuyos)
+
+  // -- Estados de Invitación y QR
   const [mostrarQR, setMostrarQR] = useState(false);
   const [mostrarPopUpUnirse, setMostrarPopUpUnirse] = useState(false);
 
-  const inputRef = useRef(null);
-  const esEditor = esCreador || esColaborador;
-  const [tabActiva, setTabActiva] = useState("info");
+  // ─── 4. EFECTOS (LIFECYCLE) ─────────────────────────────────────────────
 
-  // EFECTO ARREGLADO: Detectar si el usuario escaneó el QR (?invitacion=true)
+  /**
+   * Efecto para detectar invitaciones a través de la URL.
+   * Se ejecuta si la URL tiene el parámetro ?invitacion=true.
+   */
   useEffect(() => {
-    // Usamos location.search en lugar de window.location para que React no se lo salte
     const parametros = new URLSearchParams(location.search);
     if (parametros.get("invitacion") === "true") {
       setMostrarPopUpUnirse(true);
     }
-  }, [location]); // <- Dependemos de location para que se ejecute si cambia
+  }, [location]);
+
+  /**
+   * Efecto principal de carga del Repositorio.
+   * Obtiene todos los datos (Repo, Archivos, Calificaciones, Colaboradores).
+   */
+  useEffect(() => {
+    (async () => {
+      setCargando(true);
+      setError("");
+      try {
+        const data = await obtenerRepositorioPublicoPorId(id);
+        setRepo(data);
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id || null;
+        setUserId(uid);
+        setEsCreador(Boolean(uid && data?.creador_id && uid === data.creador_id));
+        
+        await Promise.all([
+          cargarArchivos(data?.id),
+          cargarRatings(data?.id),
+          cargarColaboradores(data?.id, uid),
+          cargarActividad(data?.id)
+        ]);
+
+        try {
+          const fav = await isRepositorioFavorito(data?.id);
+          setIsFavorito(Boolean(fav));
+        } catch (e) {
+          console.warn("Error checking favorite:", e.message);
+        }
+      } catch (e) {
+        setError(e.message);
+        setRepo(null);
+      } finally {
+        setCargando(false);
+      }
+    })();
+  }, [id]);
+
+  // ─── 5. FUNCIONES DE CARGA DE DATOS (HELPERS) ──────────────────────────
 
   async function cargarArchivos(repoId) {
     if (!repoId) {
@@ -85,33 +156,6 @@ export default function RepositorioPublicoDetalle() {
     }
     const data = await listarArchivosRepositorioPublico({ repositorioId: repoId });
     setArchivos(data);
-  }
-
-  async function manejarResumirConIA() {
-    setIaError("");
-    setIaResumen("");
-    setIaGenerando(true);
-    try {
-      const resumen = await generarResumenRepositorio({
-        nombreRepo: repo.titulo,
-        archivos
-      });
-      setIaResumen(resumen);
-
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user?.id) {
-        await supabase.from("ia_resumenes").insert({
-          user_id: session.user.id,
-          repositorio_tipo: "publico",
-          repositorio_id: repo.id,
-          resumen
-        });
-      }
-    } catch (e) {
-      setIaError(e.message);
-    } finally {
-      setIaGenerando(false);
-    }
   }
 
   async function cargarRatings(repoId) {
@@ -147,40 +191,6 @@ export default function RepositorioPublicoDetalle() {
     }
   }
 
-  useEffect(() => {
-    (async () => {
-      setCargando(true);
-      setError("");
-      try {
-        const data = await obtenerRepositorioPublicoPorId(id);
-        setRepo(data);
-        const { data: { session } } = await supabase.auth.getSession();
-        const uid = session?.user?.id || null;
-        setUserId(uid);
-        setEsCreador(Boolean(uid && data?.creador_id && uid === data.creador_id));
-        
-        await Promise.all([
-          cargarArchivos(data?.id),
-          cargarRatings(data?.id),
-          cargarColaboradores(data?.id, uid),
-          cargarActividad(data?.id)
-        ]);
-
-        try {
-          const fav = await isRepositorioFavorito(data?.id);
-          setIsFavorito(Boolean(fav));
-        } catch (e) {
-          console.warn("Error checking favorite:", e.message);
-        }
-      } catch (e) {
-        setError(e.message);
-        setRepo(null);
-      } finally {
-        setCargando(false);
-      }
-    })();
-  }, [id]);
-
   async function cargarActividad(repoId) {
     if (!repoId) return;
     try {
@@ -196,41 +206,54 @@ export default function RepositorioPublicoDetalle() {
     }
   }
 
-  async function publicarAnuncio() {
-    if (!repo?.id || !esCreador || !nuevoAnuncio.trim()) return;
+  // ─── 6. FUNCIONES DE INTERACCIÓN (HANDLERS) ────────────────────────────
+
+  // --- IA ---
+  async function manejarResumirConIA() {
+    setIaError("");
+    setIaResumen("");
+    setIaGenerando(true);
     try {
-      const { error } = await supabase.from("repositorio_publico_actividad").insert({
-        repositorio_id: repo.id,
-        actor_id: userId,
-        mensaje: `ANUNCIO::${nuevoAnuncio.trim()}`
+      const resumen = await generarResumenRepositorio({
+        nombreRepo: repo.titulo,
+        archivos
       });
-      if (error) throw error;
-      setNuevoAnuncio("");
-      await cargarActividad(repo.id);
+      setIaResumen(resumen);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user?.id) {
+        await supabase.from("ia_resumenes").insert({
+          user_id: session.user.id,
+          repositorio_tipo: "publico",
+          repositorio_id: repo.id,
+          resumen
+        });
+      }
     } catch (e) {
-      setMensaje(`Error: ${e.message}`);
+      setIaError(e.message);
+    } finally {
+      setIaGenerando(false);
     }
   }
 
+  // --- Archivos ---
   const manejarArchivos = files => {
     const tiposPermitidos = [
       "application/pdf",
       "image/png",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     ];
-    const archivos = Array.from(files || []);
-    const archivosValidos = archivos.filter(
+    const archivosArray = Array.from(files || []);
+    const archivosValidos = archivosArray.filter(
       file => tiposPermitidos.includes(file.type) && file.size <= 20 * 1024 * 1024
     );
-    if (archivos.length && !archivosValidos.length) {
+    if (archivosArray.length && !archivosValidos.length) {
       setMensaje("Solo se permiten archivos PDF, DOCX o PNG de hasta 20MB.");
     }
     setArchivosSeleccionados(archivosValidos);
   };
 
-  const manejarDragOver = (e) => {
-    e.preventDefault();
-  };
+  const manejarDragOver = (e) => e.preventDefault();
 
   const manejarDrop = (e) => {
     e.preventDefault();
@@ -270,6 +293,7 @@ export default function RepositorioPublicoDetalle() {
     }
   }
 
+  // --- Colaboradores e Invitaciones ---
   async function manejarAgregarColaborador() {
     const correo = emailColaborador.trim();
     if (!repo?.id || !esCreador || !correo) return;
@@ -298,8 +322,8 @@ export default function RepositorioPublicoDetalle() {
         .insert({
           repositorio_id: repo.id,
           user_id: userId,
-            email: emailUsuario,
-            created_by: userId
+          email: emailUsuario,
+          created_by: userId
         });
 
       if (error && error.code !== '23505') throw error;
@@ -315,6 +339,23 @@ export default function RepositorioPublicoDetalle() {
       alert(`Aviso: ${e.message}`);
       setMostrarPopUpUnirse(false);
       window.history.replaceState(null, "", location.pathname);
+    }
+  }
+
+  // --- Generales (Calificaciones, Anuncios, Favoritos, Configuración) ---
+  async function publicarAnuncio() {
+    if (!repo?.id || !esCreador || !nuevoAnuncio.trim()) return;
+    try {
+      const { error } = await supabase.from("repositorio_publico_actividad").insert({
+        repositorio_id: repo.id,
+        actor_id: userId,
+        mensaje: `ANUNCIO::${nuevoAnuncio.trim()}`
+      });
+      if (error) throw error;
+      setNuevoAnuncio("");
+      await cargarActividad(repo.id);
+    } catch (e) {
+      setMensaje(`Error: ${e.message}`);
     }
   }
 
@@ -341,7 +382,6 @@ export default function RepositorioPublicoDetalle() {
   }
 
   async function manejarEliminarRepositorio() {
-    // Abrir modal de confirmación en lugar del confirm nativo
     if (!repo?.id || !esCreador) return;
     setMostrarConfirmEliminar(true);
   }
@@ -367,9 +407,13 @@ export default function RepositorioPublicoDetalle() {
     }
   }
 
+  // ─── 7. RENDERIZADO CONDICIONAL (Cargando / Errores) ────────────────────
+  
   if (cargando) return <div className="container"><div className="card">Cargando...</div></div>;
   if (!repo) return <div className="container"><div className="card">No encontrado</div></div>;
 
+  // ─── 8. RENDERIZADO PRINCIPAL (JSX) ─────────────────────────────────────
+  
   const colorRepo = obtenerColorEntidad({
     tipo: "repo_publico",
     entidadId: repo.id,
@@ -379,12 +423,14 @@ export default function RepositorioPublicoDetalle() {
 
   return (
     <div className="container">
-      {/* Banner Superior */}
+      
+      {/* ── Banner Superior ── */}
       <div className="group-banner" style={{ "--banner-a": colorRepo?.a || "#6c757d", "--banner-b": colorRepo?.b || "#343a40" }}>
         <div className="group-banner-content group-banner-single">
           <button className="btn arrow-back group-back-btn" onClick={() => navigate("/grupos")}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" style={{width:20}}><path d="M15 6L9 12L15 18" /></svg>
           </button>
+          
           <div className="group-banner-main">
             <div className="group-banner-title">{repo.titulo}</div>
             <div className="group-banner-subtitle">Público · {repo.creador_nombre}</div>
@@ -399,13 +445,14 @@ export default function RepositorioPublicoDetalle() {
         </div>
       </div>
 
+      {/* ── Menú de Pestañas (Tabs) ── */}
       <div className="group-tabs">
         <button className={`group-tab ${tabActiva === "info" ? "active" : ""}`} onClick={() => setTabActiva("info")}>Info</button>
         <button className={`group-tab ${tabActiva === "archivos" ? "active" : ""}`} onClick={() => setTabActiva("archivos")}>Archivos</button>
         <button className={`group-tab ${tabActiva === "people" ? "active" : ""}`} onClick={() => setTabActiva("people")}>Personas</button>
       </div>
 
-      {/* Contenido Dinámico */}
+      {/* ── PESTAÑA: INFO ── */}
       {tabActiva === "info" && (
         <div className="group-tab-content">
           <div className="card">
@@ -425,6 +472,7 @@ export default function RepositorioPublicoDetalle() {
               Este repositorio es público y no está vinculado a un grupo.
             </div>
             
+            {/* Zona de Calificación Estrellas */}
             <div style={{ marginTop: 20, borderTop: "1px solid #eee", paddingTop: 10 }}>
               {userId ? (
                 <>
@@ -436,7 +484,7 @@ export default function RepositorioPublicoDetalle() {
               )}
             </div>
 
-            {/* Botón IA */}
+            {/* Zona de Inteligencia Artificial */}
             <div style={{ marginTop: 16, borderTop: "1px solid #eee", paddingTop: 14 }}>
               <button
                 className="btn btnPrimary"
@@ -445,11 +493,13 @@ export default function RepositorioPublicoDetalle() {
               >
                 {iaGenerando ? "Generando resumen..." : "✨ Resumir con IA"}
               </button>
+              
               {iaError && (
                 <div className="alert alert-error" style={{ marginTop: 10 }}>
                   {iaError}
                 </div>
               )}
+              
               {iaResumen && (
                 <div className="ia-resultado" style={{ marginTop: 14 }}>
                   <strong style={{ display: "block", marginBottom: 8 }}>Resumen IA</strong>
@@ -458,6 +508,7 @@ export default function RepositorioPublicoDetalle() {
               )}
             </div>
 
+            {/* Zona de Configuración (Solo Creador) */}
             {esCreador && (
               <div style={{ marginTop: 12 }}>
                   <button className="btn" onClick={manejarEliminarRepositorio}>
@@ -497,9 +548,12 @@ export default function RepositorioPublicoDetalle() {
             )}
           </div>
 
+          {/* Tarjeta de Anuncios */}
           <div style={{ marginTop: 12 }}>
             <div className="card">
               <strong>Anuncios</strong>
+              
+              {/* Formulario Anuncio (Solo creador) */}
               {esCreador && (
                 <div style={{ marginTop: 8 }}>
                   <textarea
@@ -515,6 +569,7 @@ export default function RepositorioPublicoDetalle() {
                 </div>
               )}
 
+              {/* Feed de Anuncios */}
               <div style={{ marginTop: 12 }}>
                 {actividad.length === 0 ? (
                   <div className="label">Aún no hay anuncios.</div>
@@ -538,8 +593,11 @@ export default function RepositorioPublicoDetalle() {
         </div>
       )}
 
+      {/* ── PESTAÑA: ARCHIVOS ── */}
       {tabActiva === "archivos" && (
         <div className="group-tab-content">
+          
+          {/* Zona de Drag & Drop (Solo editores) */}
           {esEditor && (
             <div className="card repo-card" style={{ maxWidth: "none", marginTop: 12 }}>
               <strong className="repo-title">Subir archivos</strong>
@@ -556,12 +614,14 @@ export default function RepositorioPublicoDetalle() {
                 </div>
               </div>
               <input ref={inputRef} type="file" multiple hidden onChange={e => manejarArchivos(e.target.files)} />
+              
               <button className="btn btnPrimary" onClick={manejarSubirArchivos} disabled={subiendo} style={{marginTop:10}}>
                 {subiendo ? "Subiendo..." : "Subir ahora"}
               </button>
             </div>
           )}
 
+          {/* Grilla de Archivos */}
           <div className="archivos-grid" style={{ marginTop: 12 }}>
             {archivos.map((file, idx) => {
               const fullPath = file.path;
@@ -570,6 +630,7 @@ export default function RepositorioPublicoDetalle() {
               const nombre = file.nombre || fullPath?.split("/").pop() || "archivo";
               const extension = nombre.split(".").pop().toLowerCase();
               const icono = extension === "pdf" ? "📄" : extension === "docx" ? "📝" : extension === "png" ? "🖼️" : "📎";
+              
               return (
                 <div key={`${file.id || idx}`} className="archivo-card">
                   <a href={pubUrl} target="_blank" rel="noopener noreferrer" className="archivo-link">
@@ -586,7 +647,6 @@ export default function RepositorioPublicoDetalle() {
                         Eliminar archivo
                       </button>
                     )}
-
                   </div>
                 </div>
               );
@@ -595,6 +655,7 @@ export default function RepositorioPublicoDetalle() {
         </div>
       )}
 
+      {/* ── PESTAÑA: PERSONAS (COLABORADORES) ── */}
       {tabActiva === "people" && (
         <div className="group-tab-content">
           <div className="card">
@@ -610,27 +671,44 @@ export default function RepositorioPublicoDetalle() {
         </div>
       )}
 
-      {/* COMPONENTE MODAL DE QR Y POPUP INVITACIÓN */}
+      {/* ── MODALES EMERGENTES (QR e Invitación) ── */}
+      
+      {/* Modal del Código QR */}
       <ModalQR 
         isOpen={mostrarQR} 
         onClose={() => setMostrarQR(false)} 
-        // Aquí también usamos location.pathname para más seguridad
         url={`${window.location.origin}${location.pathname}?invitacion=true`} 
         titulo={repo.titulo} 
       />
 
+      {/* Pop-up de Invitación (Al acceder con ?invitacion=true) */}
       {mostrarPopUpUnirse && (
         <div style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.8)", display: "flex", justifyContent: "center", alignItems: "center", zIndex: 9999 }}>
           <div style={{ backgroundColor: "white", padding: 30, borderRadius: 12, textAlign: "center", maxWidth: 350 }}>
             <h3>¡Invitación Recibida!</h3>
             <p>¿Quieres unirte como colaborador a <b>{repo.titulo}</b>?</p>
             <div style={{ display: "flex", gap: 10, justifyContent: "center", marginTop: 20 }}>
-              <button onClick={() => { setMostrarPopUpUnirse(false); window.history.replaceState(null, "", location.pathname); }} className="btn">Cancelar</button>
-              <button onClick={manejarUnirsePorInvitacion} className="btn btnPrimary" style={{background: "#007bff", color: "white"}}>Sí, unirme</button>
+              <button 
+                className="btn"
+                onClick={() => { 
+                  setMostrarPopUpUnirse(false); 
+                  window.history.replaceState(null, "", location.pathname); 
+                }} 
+              >
+                Cancelar
+              </button>
+              <button 
+                className="btn btnPrimary" 
+                style={{background: "#007bff", color: "white"}}
+                onClick={manejarUnirsePorInvitacion} 
+              >
+                Sí, unirme
+              </button>
             </div>
           </div>
         </div>
       )}
+      
     </div>
   );
 }

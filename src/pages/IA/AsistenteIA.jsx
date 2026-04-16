@@ -1,16 +1,30 @@
+/**
+ * COMPONENTE: AsistenteIA
+ * ----------------------------------------------------------------------
+ * Vista que integra las funcionalidades de Inteligencia Artificial.
+ * Contiene dos pestañas:
+ * 1. Planificador: Genera un plan de estudio leyendo las tareas pendientes y el horario.
+ * 2. Chat Libre: Permite conversar con la IA usando el contexto del estudiante,
+ * guardando y gestionando un historial de conversaciones.
+ */
+
+// ─── 1. IMPORTACIONES ───────────────────────────────────────────────────
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../config/supabaseClient";
+import { supabase } from "../../config/supabaseClient";
+import "../../estilos/flux.css";
+
+// Endpoints / API Services
 import {
   listarGruposDelUsuario,
   listarTareasGrupo,
   guardarMensajeChat,
   listarHistorialChat,
   eliminarHistorialChatPorId
-} from "../servicios/grupos.api";
-import { generarPlanEstudio, chatConIA } from "../servicios/ia.api";
-import "../estilos/flux.css";
+} from "../../servicios/grupos.api";
+import { generarPlanEstudio, chatConIA } from "../../servicios/ia.api";
 
+// ─── 2. CONSTANTES GLOBALES ─────────────────────────────────────────────
 const DIAS = [
   { value: 0, label: "Dom" },
   { value: 1, label: "Lun" },
@@ -22,29 +36,33 @@ const DIAS = [
 ];
 
 export default function AsistenteIA() {
+  
+  // ─── 3. ESTADOS LOCALES Y REFERENCIAS ──────────────────────────────────
   const navigate = useNavigate();
   const [tabActiva, setTabActiva] = useState("planificador");
 
-  // ── Sesión ──────────────────────────────────────────────
+  // ── Sesión y Usuario
   const [userId, setUserId] = useState(null);
   const [displayName, setDisplayName] = useState("");
   const [cargandoSesion, setCargandoSesion] = useState(true);
 
-  // ── Tab Planificador ────────────────────────────────────
+  // ── Tab: Planificador
   const [tareasPendientes, setTareasPendientes] = useState([]);
   const [horario, setHorario] = useState([]);
   const [reposGrupos, setReposGrupos] = useState([]);
   const [cargandoContexto, setCargandoContexto] = useState(false);
-  const [restriccionesPlan, setRestriccionesPlan] = useState(""); // 🟢 NUEVO: Estado para restricciones
+  const [restriccionesPlan, setRestriccionesPlan] = useState(""); 
   const [generandoPlan, setGenerandoPlan] = useState(false);
   const [planResultado, setPlanResultado] = useState("");
   const [errorPlan, setErrorPlan] = useState("");
 
-  // ── Tab Chat ─────────────────────────────────────────────
+  // ── Tab: Chat Libre
   const [mensajesChat, setMensajesChat] = useState([]);
   const [inputChat, setInputChat] = useState("");
   const [enviandoChat, setEnviandoChat] = useState(false);
   const [errorChat, setErrorChat] = useState("");
+  
+  // ── Historial y UI del Chat
   const [cargandoHistorial, setCargandoHistorial] = useState(false);
   const [chatsGuardados, setChatsGuardados] = useState([]);
   const [chatActivoId, setChatActivoId] = useState(null);
@@ -53,11 +71,15 @@ export default function AsistenteIA() {
   const [tituloEditando, setTituloEditando] = useState("");
   const [menuChatIdAbierto, setMenuChatIdAbierto] = useState(null);
   const [eliminandoChatId, setEliminandoChatId] = useState(null);
+  
   const chatEndRef = useRef(null);
 
-  // ─────────────────────────────────────────────────────────
-  // Cargar sesión inicial
-  // ─────────────────────────────────────────────────────────
+  // ─── 4. EFECTOS (LIFECYCLE) ─────────────────────────────────────────────
+
+  /**
+   * Efecto 1: Cargar Sesión
+   * Obtiene la sesión actual al montar el componente.
+   */
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUserId(session?.user?.id || null);
@@ -66,15 +88,18 @@ export default function AsistenteIA() {
     });
   }, []);
 
-  // ─────────────────────────────────────────────────────────
-  // Cargar contexto del usuario (horario + grupos + tareas)
-  // ─────────────────────────────────────────────────────────
+  /**
+   * Efecto 2: Cargar Contexto
+   * Si hay un usuario, lee sus bloques de horario, grupos y tareas pendientes 
+   * para enviárselos a la IA como contexto de estudio.
+   */
   useEffect(() => {
     if (!userId) return;
 
     const cargar = async () => {
       setCargandoContexto(true);
       try {
+        // 1. Obtener horario
         const { data: bloquesData } = await supabase
           .from("bloques_horario")
           .select("id, day_of_week, start_time, end_time, type")
@@ -89,9 +114,11 @@ export default function AsistenteIA() {
         }));
         setHorario(bloques);
 
+        // 2. Obtener grupos
         const grupos = await listarGruposDelUsuario();
         setReposGrupos(grupos);
 
+        // 3. Extraer tareas pendientes de cada grupo
         const todasTareas = [];
         await Promise.all(
           grupos.map(async g => {
@@ -107,6 +134,7 @@ export default function AsistenteIA() {
           })
         );
         setTareasPendientes(todasTareas);
+        
       } catch (e) {
         console.error("Error cargando contexto IA:", e);
       } finally {
@@ -117,7 +145,11 @@ export default function AsistenteIA() {
     cargar();
   }, [userId]);
 
-  // Cargar historial de chat al entrar al tab de chat
+  /**
+   * Efecto 3: Cargar Historial de Chat
+   * Se ejecuta al entrar a la pestaña de "chat". Lee de la base de datos 
+   * todas las conversaciones anteriores.
+   */
   useEffect(() => {
     if (tabActiva !== "chat" || !userId) return;
     const cargar = async () => {
@@ -138,6 +170,10 @@ export default function AsistenteIA() {
     cargar();
   }, [tabActiva, userId]);
 
+  /**
+   * Efecto 4: Sincronizar títulos personalizados
+   * Carga desde el localStorage los nombres custom de los chats al iniciar.
+   */
   useEffect(() => {
     if (!userId) return;
     const key = `flux_chat_titles_${userId}`;
@@ -149,18 +185,30 @@ export default function AsistenteIA() {
     }
   }, [userId]);
 
+  /**
+   * Efecto 5: Guardar títulos personalizados
+   * Escribe en localStorage cuando el usuario renombra un chat.
+   */
   useEffect(() => {
     if (!userId) return;
     const key = `flux_chat_titles_${userId}`;
     localStorage.setItem(key, JSON.stringify(titulosPersonalizados));
   }, [titulosPersonalizados, userId]);
 
+  /**
+   * Efecto 6: Auto-scroll
+   * Baja la vista automáticamente al último mensaje al enviar/recibir.
+   */
   useEffect(() => {
     if (tabActiva === "chat") {
       chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [mensajesChat, tabActiva]);
 
+  /**
+   * Efecto 7: Cerrar Kebab Menu
+   * Cierra el menú de opciones de los chats si se hace click/touch afuera.
+   */
   useEffect(() => {
     if (!menuChatIdAbierto) return;
 
@@ -178,9 +226,12 @@ export default function AsistenteIA() {
     };
   }, [menuChatIdAbierto]);
 
-  // ─────────────────────────────────────────────────────────
-  // Helpers
-  // ─────────────────────────────────────────────────────────
+  // ─── 5. FUNCIONES AUXILIARES (HELPERS) ──────────────────────────────────
+  
+  /**
+   * Arma el objeto JSON que se enviará a la IA para que conozca
+   * la situación actual del estudiante.
+   */
   function buildContextoUsuario() {
     return {
       nombreUsuario: displayName,
@@ -203,6 +254,10 @@ export default function AsistenteIA() {
     return limpio.length > 48 ? `${limpio.slice(0, 48)}...` : limpio;
   }
 
+  /**
+   * Procesa el historial plano de la base de datos agrupándolo
+   * en objetos de conversación (ID -> Mensajes).
+   */
   function construirConversaciones(historial = []) {
     const porChat = new Map();
     const ordenado = [...historial].sort(
@@ -315,14 +370,17 @@ export default function AsistenteIA() {
 
     try {
       await eliminarHistorialChatPorId(chat.id);
+      
       const restantes = chatsGuardados.filter(c => c.id !== chat.id);
       setChatsGuardados(restantes);
+      
       setTitulosPersonalizados(prev => {
         const next = { ...prev };
         delete next[chat.id];
         return next;
       });
 
+      // Si borramos el chat que estamos viendo, pasamos al siguiente o a uno nuevo
       if (chatActivoId === chat.id) {
         if (restantes.length > 0) {
           setChatActivoId(restantes[0].id);
@@ -338,18 +396,22 @@ export default function AsistenteIA() {
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Handlers
-  // ─────────────────────────────────────────────────────────
+  // ─── 6. MANEJADORES DE EVENTOS (HANDLERS) ───────────────────────────────
+  
+  /**
+   * Ejecuta el Prompt de Planificador.
+   * Llama a la API de IA enviando el contexto y las reglas manuales.
+   */
   async function manejarGenerarPlan() {
     setErrorPlan("");
     setPlanResultado("");
     setGenerandoPlan(true);
+    
     try {
       const resultado = await generarPlanEstudio({ 
         tareas: tareasPendientes, 
         horario,
-        restricciones: restriccionesPlan // 🟢 Se envían las restricciones a la API
+        restricciones: restriccionesPlan // Reglas custom del usuario
       });
       setPlanResultado(resultado);
     } catch (e) {
@@ -359,6 +421,10 @@ export default function AsistenteIA() {
     }
   }
 
+  /**
+   * Ejecuta el Prompt de Chat Libre.
+   * Envía el historial de la conversación y actualiza la UI optimísticamente.
+   */
   async function manejarEnviarChat() {
     const texto = inputChat.trim();
     if (!texto || enviandoChat) return;
@@ -366,12 +432,15 @@ export default function AsistenteIA() {
     const chatIdActual = chatActivoId || crearChatId();
     if (!chatActivoId) setChatActivoId(chatIdActual);
 
+    // 1. Render optimista del mensaje del usuario
     const nuevoMensajeUsuario = { role: "user", text: texto };
     const mensajesActualizados = [...mensajesChat, nuevoMensajeUsuario];
+    
     setMensajesChat(mensajesActualizados);
     setInputChat("");
     setEnviandoChat(true);
     setErrorChat("");
+    
     upsertConversacionLocal({
       id: chatIdActual,
       mensajes: mensajesActualizados,
@@ -379,14 +448,18 @@ export default function AsistenteIA() {
       tituloBase: texto
     });
 
+    // 2. Llamada a la IA
     try {
       const respuesta = await chatConIA({
         mensajes: mensajesActualizados,
         contextoUsuario: buildContextoUsuario()
       });
+      
       const nuevoMensajeIA = { role: "assistant", text: respuesta };
       const mensajesFinales = [...mensajesActualizados, nuevoMensajeIA];
+      
       setMensajesChat(mensajesFinales);
+      
       upsertConversacionLocal({
         id: chatIdActual,
         mensajes: mensajesFinales,
@@ -394,9 +467,11 @@ export default function AsistenteIA() {
         tituloBase: texto
       });
 
+      // 3. Guardar persistente en BD en segundo plano
       guardarMensajeChat({ mensajeUsuario: texto, respuestaIA: respuesta, chatId: chatIdActual }).catch(
         e => console.error("Error guardando chat:", e)
       );
+      
     } catch (e) {
       setErrorChat(e.message);
     } finally {
@@ -411,9 +486,8 @@ export default function AsistenteIA() {
     }
   }
 
-  // ─────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────
+  // ─── 7. RENDERIZADO CONDICIONAL (Validaciones) ──────────────────────────
+  
   if (cargandoSesion) {
     return (
       <div className="container">
@@ -438,12 +512,15 @@ export default function AsistenteIA() {
     );
   }
 
+  // ─── 8. RENDERIZADO PRINCIPAL (JSX) ─────────────────────────────────────
+  
   const chatActivo = chatsGuardados.find(c => c.id === chatActivoId) || null;
   const tituloChatActivo = chatActivo ? obtenerTituloVisual(chatActivo) : "Selecciona un chat";
 
   return (
     <div className="container">
-      {/* Topbar */}
+      
+      {/* ── Topbar ── */}
       <div className="topbar">
         <div className="brand">
           <div className="logoDot" />
@@ -470,7 +547,7 @@ export default function AsistenteIA() {
         </div>
       )}
 
-      {/* Tabs Simplificadas (Sin Resumidor) */}
+      {/* ── Navegación Pestañas (Tabs) ── */}
       <div className="group-tabs">
         <button
           className={`group-tab ${tabActiva === "planificador" ? "active" : ""}`}
@@ -486,19 +563,14 @@ export default function AsistenteIA() {
         </button>
       </div>
 
-      {/* ── TAB 1: Planificador ── */}
+      {/* ── TAB: PLANIFICADOR ── */}
       {tabActiva === "planificador" && (
         <div className="group-tab-content">
           
-          <div
-            className="card"
-            style={{
-              position: "relative",
-              zIndex: menuChatIdAbierto ? 40 : "auto"
-            }}
-          >
+          <div className="card" style={{ position: "relative", zIndex: menuChatIdAbierto ? 40 : "auto" }}>
             <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem" }}>Tu Contexto Académico</h3>
             
+            {/* Tareas Pendientes */}
             <div style={{ marginBottom: "16px" }}>
               <strong>📋 Tareas pendientes</strong>
               {tareasPendientes.length === 0 ? (
@@ -522,6 +594,7 @@ export default function AsistenteIA() {
 
             <hr style={{ border: "none", borderTop: "1px solid var(--borde)", margin: "16px 0" }} />
 
+            {/* Horario */}
             <div>
               <strong>⏰ Tu horario semanal</strong>
               {horario.length === 0 ? (
@@ -562,7 +635,7 @@ export default function AsistenteIA() {
             </div>
           </div>
 
-          {/* 🟢 NUEVO: Tarjeta de Restricciones */}
+          {/* Tarjeta de Restricciones (Reglas Personalizadas) */}
           <div className="card" style={{ marginTop: 12 }}>
             <strong style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               ⚙️ Reglas y Preferencias
@@ -586,6 +659,7 @@ export default function AsistenteIA() {
             </div>
           )}
 
+          {/* Acción Planificador */}
           <div style={{ marginTop: 16 }}>
             <button
               className="btn btnPrimary"
@@ -597,6 +671,7 @@ export default function AsistenteIA() {
             </button>
           </div>
 
+          {/* Resultado de la IA */}
           {planResultado && (
             <div className="card ia-resultado" style={{ marginTop: 16 }}>
               <strong style={{ display: "block", marginBottom: 8, fontSize: "1.1rem" }}>🎯 Tu Plan Generado</strong>
@@ -606,9 +681,11 @@ export default function AsistenteIA() {
         </div>
       )}
 
-      {/* ── TAB 2: Chat libre ── */}
+      {/* ── TAB: CHAT LIBRE ── */}
       {tabActiva === "chat" && (
         <div className="group-tab-content">
+          
+          {/* Columna / Panel Izquierdo: Historial de Chats */}
           <div className="card">
             <div className="ia-chat-sesiones-head">
               <strong>Historial de Chats</strong>
@@ -629,6 +706,8 @@ export default function AsistenteIA() {
                     className={`ia-chat-sesion-btn ${chatActivoId === c.id ? "active" : ""}`}
                     style={{ position: "relative", display: "flex", alignItems: "center" }}
                   >
+                    
+                    {/* Modo Edición de Nombre */}
                     {editandoChatId === c.id ? (
                       <div style={{ width: "100%", display: "flex", gap: 8, alignItems: "center" }}>
                         <input
@@ -665,6 +744,8 @@ export default function AsistenteIA() {
                           <span>{obtenerTituloVisual(c)}</span>
                           <span className="label">{formatearFechaChat(c.updatedAt)}</span>
                         </button>
+                        
+                        {/* Menú Kebab del Chat */}
                         <div
                           className="classroom-card-menu-wrap"
                           style={{
@@ -719,18 +800,21 @@ export default function AsistenteIA() {
             )}
           </div>
 
+          {/* Columna / Panel Derecho: Conversación Activa */}
           <div className="card chat-card">
             <div className="chat-header">
               <strong>Chat con FLUX IA: {tituloChatActivo}</strong>
               <span className="label">Resuelve dudas sobre tus materias o tareas</span>
             </div>
 
+            {/* Ventana de Mensajes */}
             <div className="ia-chat-messages">
               {cargandoHistorial && (
                 <p className="label" style={{ textAlign: "center", padding: 16 }}>
                   Cargando...
                 </p>
               )}
+              
               {!cargandoHistorial && mensajesChat.length === 0 && (
                 <div className="ia-chat-empty">
                   <span style={{ fontSize: "2.5rem" }}>👋</span>
@@ -741,6 +825,8 @@ export default function AsistenteIA() {
                   </p>
                 </div>
               )}
+              
+              {/* Renderizado de Mensajes (Usuario y AI) */}
               {mensajesChat.map((m, i) => (
                 <div
                   key={i}
@@ -749,11 +835,15 @@ export default function AsistenteIA() {
                   <pre className="ia-pre ia-pre-chat">{m.text}</pre>
                 </div>
               ))}
+              
+              {/* Animación "Escribiendo" de la IA */}
               {enviandoChat && (
                 <div className="ia-chat-bubble ia-bubble-ia">
                   <span className="ia-typing">Escribiendo...</span>
                 </div>
               )}
+              
+              {/* Div invisible para forzar el scroll al fondo */}
               <div ref={chatEndRef} />
             </div>
 
@@ -763,6 +853,7 @@ export default function AsistenteIA() {
               </div>
             )}
 
+            {/* Input y Botón de Envío */}
             <div className="chat-input" style={{ marginTop: 12 }}>
               <textarea
                 className="input"
@@ -782,6 +873,7 @@ export default function AsistenteIA() {
               </button>
             </div>
           </div>
+          
         </div>
       )}
     </div>

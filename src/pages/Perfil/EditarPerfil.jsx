@@ -1,8 +1,19 @@
+/**
+ * COMPONENTE: EditarPerfil
+ * ----------------------------------------------------------------------
+ * Vista donde el usuario puede gestionar su información personal.
+ * Permite cambiar datos básicos, subir/eliminar una foto de perfil (Avatar),
+ * cambiar la contraseña y configurar un horario académico detallado
+ * con validación de solapamiento de horas.
+ */
+
+// ─── 1. IMPORTACIONES ───────────────────────────────────────────────────
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "../config/supabaseClient";
-import "../estilos/flux.css";
+import { supabase } from "../../config/supabaseClient";
+import "../../estilos/flux.css";
 
+// ─── 2. CONSTANTES Y FUNCIONES AUXILIARES (HELPERS) ─────────────────────
 const AVATAR_BUCKET = "Flux_repositorioGrupos";
 
 const DIAS = [
@@ -15,54 +26,78 @@ const DIAS = [
   { value: 0, label: "Dom" }
 ];
 
+/**
+ * Convierte una hora en formato "HH:MM" a minutos totales (ej. "10:30" -> 630).
+ * Útil para comparar duraciones fácilmente.
+ */
 function timeToMinutes(t) {
   const [h, m] = t.split(":").map(Number);
   return h * 60 + m;
 }
 
+/**
+ * Valida que un nuevo bloque de horario sea lógico (inicio < fin)
+ * y que no colisione (se solape) con otros bloques ya guardados ese mismo día.
+ */
 function validarBloque(bloque, existentes, excludeId = null) {
   if (!bloque.startTime || !bloque.endTime) {
     return "Debes definir hora de inicio y fin.";
   }
+  
   const inicio = timeToMinutes(bloque.startTime);
   const fin = timeToMinutes(bloque.endTime);
+  
   if (inicio >= fin) {
     return "La hora de inicio debe ser menor que la hora de fin.";
   }
+  
   const solapa = (existentes || []).some(b => {
-    if (excludeId && b.id === excludeId) return false;
+    if (excludeId && b.id === excludeId) return false; // Ignorar el mismo bloque si se está editando
     if (b.dayOfWeek !== bloque.dayOfWeek) return false;
+    
     const eInicio = timeToMinutes(b.startTime);
     const eFin = timeToMinutes(b.endTime);
+    
+    // Condición de solapamiento
     return inicio < eFin && fin > eInicio;
   });
+  
   if (solapa) {
     return "El bloque se solapa con otro en el mismo día.";
   }
+  
   return "";
 }
 
 export default function EditarPerfil() {
+  // ─── 3. ESTADOS Y HOOKS DE NAVEGACIÓN ──────────────────────────────────
   const navigate = useNavigate();
+  
+  // -- Estados de UI (Carga, Errores, Éxitos)
   const [cargando, setCargando] = useState(true);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState("");
 
+  // -- Datos de Cuenta (Solo lectura)
   const [email, setEmail] = useState("");
   const [userId, setUserId] = useState("");
   const [creadoEn, setCreadoEn] = useState("");
 
+  // -- Datos de Perfil Público
   const [displayName, setDisplayName] = useState("");
   const [username, setUsername] = useState("");
   const [telefono, setTelefono] = useState("");
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [career, setCareer] = useState("");
+  
+  // -- Avatar
   const [avatarUrl, setAvatarUrl] = useState("");
   const [avatarPath, setAvatarPath] = useState("");
   const [avatarUploading, setAvatarUploading] = useState(false);
 
+  // -- Seguridad (Cambio de Contraseña)
   const [passwordActual, setPasswordActual] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
@@ -70,6 +105,7 @@ export default function EditarPerfil() {
   const [mostrarNueva, setMostrarNueva] = useState(false);
   const [mostrarConfirm, setMostrarConfirm] = useState(false);
 
+  // -- Gestión de Horario Académico
   const [horario, setHorario] = useState([]);
   const [dia, setDia] = useState(1);
   const [horaInicio, setHoraInicio] = useState("10:00");
@@ -77,6 +113,9 @@ export default function EditarPerfil() {
   const [tipo, setTipo] = useState("");
   const [editandoId, setEditandoId] = useState(null);
 
+  // ─── 4. DATOS COMPUTADOS (MEMOS) ───────────────────────────────────────
+  
+  // Genera un string de lectura rápida para el horario actual
   const resumenHorario = useMemo(() => {
     if (!horario.length) return "Sin horario";
     return horario
@@ -93,48 +132,55 @@ export default function EditarPerfil() {
       .join(", ");
   }, [horario]);
 
+  // ─── 5. EFECTOS (LIFECYCLE) ────────────────────────────────────────────
+
+  /**
+   * Carga inicial: Obtiene la sesión del usuario, sus datos de la tabla 
+   * profiles, su horario guardado y busca su avatar en el Storage.
+   */
   useEffect(() => {
     const cargar = async () => {
       setError("");
-      const {
-        data: { session },
-        error: sessionError
-      } = await supabase.auth.getSession();
+      
+      // 1. Obtener Sesión
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
       if (sessionError) {
         setError("No se pudo leer la sesión.");
         setCargando(false);
         return;
       }
+      
       const user = session?.user;
       if (!user) {
         setError("No hay sesión activa.");
         setCargando(false);
         return;
       }
+      
       setEmail(user.email || "");
       setUserId(user.id || "");
       setCreadoEn(user.created_at ? new Date(user.created_at).toLocaleString() : "");
       const meta = user.user_metadata || {};
 
+      // 2. Obtener datos extendidos del perfil
       const { data: perfilData, error: perfilError } = await supabase
         .from("profiles")
         .select("username, telefono, nombre, apellido, career")
         .eq("id", user.id)
         .maybeSingle();
 
-      if (perfilError) {
-        setError("No se pudo cargar el perfil desde la tabla perfiles.");
-      }
+      if (perfilError) setError("No se pudo cargar el perfil desde la tabla perfiles.");
 
+      // 3. Obtener bloques de horario
       const { data: bloquesData, error: bloquesError } = await supabase
         .from("bloques_horario")
         .select("id, day_of_week, start_time, end_time, type")
         .eq("user_id", user.id);
 
-      if (bloquesError) {
-        setError("No se pudo cargar los bloques de horario.");
-      }
+      if (bloquesError) setError("No se pudo cargar los bloques de horario.");
 
+      // 4. Asignar los valores a los estados combinando metadata y perfil
       const perfil = perfilData || {};
       const displayNameValue = meta.display_name || "";
       setDisplayName(displayNameValue);
@@ -143,12 +189,15 @@ export default function EditarPerfil() {
       setNombre(perfil.nombre || meta.first_name || "");
       setApellido(perfil.apellido || meta.last_name || "");
       setCareer(perfil.career || meta.career || "");
+      
+      // 5. Resolver URL del Avatar
       let avatarPublicUrl = "";
       const { data: avatarData } = supabase.storage
         .from(AVATAR_BUCKET)
         .getPublicUrl(`avatars/${user.id}`);
       avatarPublicUrl = avatarData?.publicUrl || "";
 
+      // Fallback si falla la lectura directa
       if (!avatarPublicUrl) {
         const { data: files } = await supabase.storage
           .from(AVATAR_BUCKET)
@@ -164,6 +213,8 @@ export default function EditarPerfil() {
 
       setAvatarUrl(meta.avatar_url || avatarPublicUrl || "");
       setAvatarPath(meta.avatar_path || "");
+      
+      // 6. Setear el Horario mapeando claves
       setHorario(
         (bloquesData || []).map(b => ({
           id: b.id,
@@ -173,10 +224,14 @@ export default function EditarPerfil() {
           type: b.type || ""
         }))
       );
+      
       setCargando(false);
     };
+    
     cargar();
   }, []);
+
+  // ─── 6. MANEJADORES DEL HORARIO (SCHEDULE HANDLERS) ────────────────────
 
   function limpiarBloque() {
     setDia(1);
@@ -201,6 +256,7 @@ export default function EditarPerfil() {
       setError("No hay sesión activa.");
       return;
     }
+    
     supabase
       .from("bloques_horario")
       .delete()
@@ -220,21 +276,18 @@ export default function EditarPerfil() {
   async function manejarGuardarBloque() {
     try {
       setOk("");
+      
+      // Validar solapamientos
       const errorValidacion = validarBloque(
-        {
-          dayOfWeek: dia,
-          startTime: horaInicio,
-          endTime: horaFin,
-          type: tipo
-        },
+        { dayOfWeek: dia, startTime: horaInicio, endTime: horaFin, type: tipo },
         horario,
         editandoId
       );
+      
       if (errorValidacion) {
         setError(errorValidacion);
         return;
       }
-
       if (!userId) {
         setError("No hay sesión activa.");
         return;
@@ -243,6 +296,7 @@ export default function EditarPerfil() {
       setError("");
 
       if (editandoId) {
+        // Actualizar bloque existente
         const { error: updateError } = await supabase
           .from("bloques_horario")
           .update({
@@ -262,17 +316,12 @@ export default function EditarPerfil() {
         setHorario(prev =>
           prev.map(b =>
             b.id === editandoId
-              ? {
-                  ...b,
-                  dayOfWeek: dia,
-                  startTime: horaInicio,
-                  endTime: horaFin,
-                  type: tipo
-                }
+              ? { ...b, dayOfWeek: dia, startTime: horaInicio, endTime: horaFin, type: tipo }
               : b
           )
         );
       } else {
+        // Insertar nuevo bloque
         const { data: insertData, error: insertError } = await supabase
           .from("bloques_horario")
           .insert({
@@ -299,12 +348,15 @@ export default function EditarPerfil() {
         };
         setHorario(prev => [...prev, nuevo]);
       }
+      
       limpiarBloque();
       setOk("Horario actualizado.");
     } catch (e) {
       setError(e?.message || "Error inesperado al guardar el horario.");
     }
   }
+
+  // ─── 7. MANEJADORES DE PERFIL Y AUTENTICACIÓN ──────────────────────────
 
   async function guardarPerfil() {
     setError("");
@@ -316,6 +368,7 @@ export default function EditarPerfil() {
       return;
     }
 
+    // Validar cambio de contraseña si se intentó hacer uno
     if (password || passwordConfirm) {
       if (!passwordActual) {
         setError("Debes ingresar tu contraseña actual.");
@@ -333,6 +386,8 @@ export default function EditarPerfil() {
     }
 
     setGuardando(true);
+    
+    // Verificar contraseña actual con Supabase antes de cambiarla
     if (password || passwordConfirm) {
       const { error: authError } = await supabase.auth.signInWithPassword({
         email,
@@ -345,6 +400,7 @@ export default function EditarPerfil() {
       }
     }
 
+    // Preparar el payload de actualización
     const payload = {
       data: {
         display_name: computedDisplayName,
@@ -361,6 +417,7 @@ export default function EditarPerfil() {
       payload.password = password;
     }
 
+    // 1. Actualizar metadata de auth y contraseña
     const { error: updateError } = await supabase.auth.updateUser(payload);
     if (updateError) {
       setError(updateError.message);
@@ -368,6 +425,7 @@ export default function EditarPerfil() {
       return;
     }
 
+    // 2. Actualizar tabla pública "profiles"
     const { error: perfilError } = await supabase
       .from("profiles")
       .upsert(
@@ -396,6 +454,8 @@ export default function EditarPerfil() {
     setGuardando(false);
   }
 
+  // ─── 8. MANEJADORES DEL AVATAR (IMÁGENES) ──────────────────────────────
+
   async function manejarSubirAvatar(file) {
     if (!file) return;
     if (!file.type.startsWith("image/")) {
@@ -410,17 +470,21 @@ export default function EditarPerfil() {
     setError("");
     setOk("");
     setAvatarUploading(true);
+    
     const path = `avatars/${userId}`;
 
+    // Subir imagen al Storage de Supabase
     const { error: uploadError } = await supabase.storage
       .from(AVATAR_BUCKET)
-      .upload(path, file, { upsert: true });
+      .upload(path, file, { upsert: true }); // Sobrescribe si ya existía
+      
     if (uploadError) {
       setError(uploadError.message);
       setAvatarUploading(false);
       return;
     }
 
+    // Actualizar estados locales de la URL pública
     const { data } = supabase.storage.from(AVATAR_BUCKET).getPublicUrl(path);
     setAvatarUrl(data.publicUrl);
     setAvatarPath(path);
@@ -434,6 +498,8 @@ export default function EditarPerfil() {
     setOk("Foto eliminada. Guarda cambios.");
   }
 
+  // ─── 9. RENDERIZADO CONDICIONAL (Cargando) ─────────────────────────────
+  
   if (cargando) {
     return (
       <div className="container">
@@ -449,8 +515,11 @@ export default function EditarPerfil() {
     .slice(0, 2)
     .toUpperCase();
 
+  // ─── 10. RENDERIZADO PRINCIPAL (JSX) ───────────────────────────────────
   return (
     <div className="container">
+      
+      {/* ── Topbar y Navegación ── */}
       <div className="topbar">
         <div className="brand">
           <div className="logoDot" />
@@ -461,20 +530,8 @@ export default function EditarPerfil() {
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn arrow-back" style={{ marginTop: 0 }} onClick={() => navigate(-1)} aria-label="Atrás">
-            <svg
-              className="arrow-back-icon"
-              viewBox="0 0 24 24"
-              fill="none"
-              xmlns="http://www.w3.org/2000/svg"
-              aria-hidden="true"
-            >
-              <path
-                d="M15 6L9 12L15 18"
-                stroke="currentColor"
-                strokeWidth="2.2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+            <svg className="arrow-back-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+              <path d="M15 6L9 12L15 18" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
           </button>
           <button
@@ -488,6 +545,8 @@ export default function EditarPerfil() {
       </div>
 
       <div className="perfil-grid">
+        
+        {/* ── Tarjeta: Información de Cuenta (Lectura) ── */}
         <div className="card cuenta-card">
             <strong>Cuenta</strong>
             <div className="profile-grid">
@@ -506,9 +565,11 @@ export default function EditarPerfil() {
             </div>
           </div>
 
+          {/* ── Tarjeta: Cambiar Contraseña ── */}
           <div className="card password-card">
             <strong>Cambiar contraseña</strong>
             <div className="password-grid">
+              
               <div>
                 <label className="label">Contraseña actual</label>
                 <div style={{ position: "relative" }}>
@@ -526,32 +587,12 @@ export default function EditarPerfil() {
                     onClick={() => setMostrarActual(v => !v)}
                   >
                     {mostrarActual ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
                         <circle cx="12" cy="12" r="3" />
                       </svg>
                     ) : (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-6 0-10-8-10-8a21.77 21.77 0 0 1 5.06-6.94" />
                         <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c6 0 10 8 10 8a21.79 21.79 0 0 1-3.17 4.26" />
                         <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
@@ -561,6 +602,7 @@ export default function EditarPerfil() {
                   </button>
                 </div>
               </div>
+
               <div>
                 <label className="label">Nueva contraseña</label>
                 <div style={{ position: "relative" }}>
@@ -578,32 +620,12 @@ export default function EditarPerfil() {
                     onClick={() => setMostrarNueva(v => !v)}
                   >
                     {mostrarNueva ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
                         <circle cx="12" cy="12" r="3" />
                       </svg>
                     ) : (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-6 0-10-8-10-8a21.77 21.77 0 0 1 5.06-6.94" />
                         <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c6 0 10 8 10 8a21.79 21.79 0 0 1-3.17 4.26" />
                         <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
@@ -613,6 +635,7 @@ export default function EditarPerfil() {
                   </button>
                 </div>
               </div>
+
               <div>
                 <label className="label">Confirmar contraseña</label>
                 <div style={{ position: "relative" }}>
@@ -630,32 +653,12 @@ export default function EditarPerfil() {
                     onClick={() => setMostrarConfirm(v => !v)}
                   >
                     {mostrarConfirm ? (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z" />
                         <circle cx="12" cy="12" r="3" />
                       </svg>
                     ) : (
-                      <svg
-                        width="18"
-                        height="18"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        aria-hidden="true"
-                      >
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                         <path d="M17.94 17.94A10.94 10.94 0 0 1 12 20c-6 0-10-8-10-8a21.77 21.77 0 0 1 5.06-6.94" />
                         <path d="M9.9 4.24A10.94 10.94 0 0 1 12 4c6 0 10 8 10 8a21.79 21.79 0 0 1-3.17 4.26" />
                         <path d="M14.12 14.12A3 3 0 0 1 9.88 9.88" />
@@ -668,6 +671,7 @@ export default function EditarPerfil() {
             </div>
           </div>
 
+          {/* ── Tarjeta: Editar Perfil Público y Avatar ── */}
           <div className="card perfil-card">
             <strong>Perfil</strong>
             <div className="profile-layout">
@@ -729,6 +733,8 @@ export default function EditarPerfil() {
                   </div>
                 </div>
               </div>
+              
+              {/* Controles del Avatar */}
               <div className="profile-avatar">
                 <div className="avatar-hero">
                   {avatarUrl ? (
@@ -748,17 +754,7 @@ export default function EditarPerfil() {
                       style={{ display: "none" }}
                       onChange={e => manejarSubirAvatar(e.target.files?.[0])}
                     />
-                    <svg
-                      width="16"
-                      height="16"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                       <path d="M12 20h9" />
                       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
                     </svg>
@@ -780,8 +776,11 @@ export default function EditarPerfil() {
             </div>
           </div>
 
+          {/* ── Tarjeta: Gestión de Horario Académico ── */}
           <div className="card horario-card">
             <strong>Horario semanal</strong>
+            
+            {/* Formulario para agregar/editar bloque */}
             <div className="schedule-form">
               <div>
                 <label className="label">Día</label>
@@ -825,6 +824,7 @@ export default function EditarPerfil() {
                 />
               </div>
             </div>
+            
             <div className="schedule-actions">
               <button className="btn btnPrimary" onClick={manejarGuardarBloque}>
                 {editandoId ? "Actualizar bloque" : "Agregar bloque"}
@@ -836,6 +836,7 @@ export default function EditarPerfil() {
               )}
             </div>
 
+            {/* Vista Calendario (Columnas visuales) */}
             {horario.length > 0 && (
               <div className="horario-calendario">
                 {DIAS.map(dia => {
@@ -866,6 +867,7 @@ export default function EditarPerfil() {
               </div>
             )}
 
+            {/* Lista Lineal de Bloques */}
             <div className="schedule-list">
               {horario
                 .slice()
@@ -897,6 +899,7 @@ export default function EditarPerfil() {
                 <div className="label">Aún no tienes bloques guardados.</div>
               )}
             </div>
+            
             <div className="label" style={{ marginTop: 8 }}>
               Resumen: {resumenHorario}
             </div>
@@ -905,11 +908,13 @@ export default function EditarPerfil() {
 
       <div style={{ height: 16 }} />
 
+      {/* ── Alertas (Errores y Éxitos de guardado) ── */}
       {error && <div className="alert">{error}</div>}
       {ok && <div className="preview">{ok}</div>}
 
       <div style={{ height: 12 }} />
 
+      {/* ── Botón Guardar Principal ── */}
       <button className="btn btnPrimary" onClick={guardarPerfil} disabled={guardando}>
         {guardando ? "Guardando..." : "Guardar cambios"}
       </button>
