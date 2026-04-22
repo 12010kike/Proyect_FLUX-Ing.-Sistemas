@@ -7,8 +7,18 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-body {
+html, body, #root {
+  height: 100%;
   margin: 0;
+  padding: 0;
+}
+
+body {
   min-height: 100vh;
   min-width: 320px;
+}
+
+img {
+  max-width: 100%;
+  display: block;
 }

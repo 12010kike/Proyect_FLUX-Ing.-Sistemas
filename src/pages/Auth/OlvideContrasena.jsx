@@ -10,7 +10,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../../config/supabaseClient'
-import '../../estilos/flux.css'
 import logoFlux from '../../assets/logo-flux.png'
 
 export default function OlvideContrasena() {

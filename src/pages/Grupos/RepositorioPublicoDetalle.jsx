@@ -37,7 +37,6 @@ import {
   obtenerColorEntidad,
   obtenerColorGuardado
 } from "../../utils/groupColors";
-import "../../estilos/flux.css";
 
 // Componentes de Interfaz
 import Estrellas from "../../components/Estrellas";

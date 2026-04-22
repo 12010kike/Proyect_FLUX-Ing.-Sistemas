@@ -13,7 +13,6 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "../../config/supabaseClient";
 import logoFlux from "../../assets/logo-flux.png";
 import { PALETA_BANNERS, obtenerColorEntidad } from "../../utils/groupColors";
-import "../../estilos/flux.css";
 
 // Endpoints / API Services
 import {

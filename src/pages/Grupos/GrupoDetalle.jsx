@@ -10,7 +10,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../../config/supabaseClient";
-import "../../estilos/flux.css";
 import logoFlux from "../../assets/logo-flux.png";
 import TaskMaster from "../Tareas/TaskMaster";
 import { PALETA_BANNERS, obtenerColorEntidad } from "../../utils/groupColors";

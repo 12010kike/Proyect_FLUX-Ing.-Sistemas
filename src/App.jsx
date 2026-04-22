@@ -12,8 +12,6 @@ import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 
 // ─── 2. IMPORTACIONES LOCALES (Configuración y Estilos) ─────────────────
 import { supabase } from "./config/supabaseClient"; // Importamos Supabase
-import "./App.css"; 
-import "./estilos/flux.css"; // Importamos los estilos globales de FLUX
 
 // ─── 3. IMPORTACIONES DE PÁGINAS (Vistas) ───────────────────────────────
 // Autenticación

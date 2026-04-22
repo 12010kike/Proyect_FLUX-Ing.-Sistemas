@@ -20,8 +20,7 @@ import {
   obtenerRepositorioParaLecturaPorCodigo
 } from "../../servicios/grupos.api"; 
 import { supabase } from "../../config/supabaseClient"; 
-import { obtenerColorEntidad } from "../../utils/groupColors"; 
-import "../../estilos/flux.css"; 
+import { obtenerColorEntidad } from "../../utils/groupColors";
 import Estrellas from "../../components/Estrellas"; 
 
 export default function DetallesRepositorio() {

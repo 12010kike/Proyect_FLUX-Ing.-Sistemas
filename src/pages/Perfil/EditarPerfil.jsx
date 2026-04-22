@@ -11,7 +11,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../config/supabaseClient";
-import "../../estilos/flux.css";
 
 // ─── 2. CONSTANTES Y FUNCIONES AUXILIARES (HELPERS) ─────────────────────
 const AVATAR_BUCKET = "Flux_repositorioGrupos";
