@@ -16,6 +16,10 @@
 
 import { supabase } from "../config/supabaseClient";
 
+const devLog = import.meta.env.DEV
+  ? { log: console.log.bind(console), warn: console.warn.bind(console), error: console.error.bind(console) }
+  : { log: () => {}, warn: () => {}, error: () => {} };
+
 /* ==========================================================================
    1. CONSTANTES Y CONFIGURACIÓN
    ========================================================================== */
@@ -138,7 +142,7 @@ async function llamarGemini(userPrompt, { maxOutputTokens = 3000, temperature = 
 
   // Detectar si la respuesta fue cortada por límite de tokens
   if (candidate?.finishReason === "MAX_TOKENS") {
-    console.warn("[FLUX IA] La respuesta fue cortada por límite de tokens. Considera aumentar maxOutputTokens.");
+    devLog.warn("[FLUX IA] La respuesta fue cortada por límite de tokens. Considera aumentar maxOutputTokens.");
   }
 
   const texto = candidate?.content?.parts?.[0]?.text;
@@ -181,12 +185,12 @@ async function obtenerUrlFirmada(path) {
       .createSignedUrl(path, 120); // válida por 2 minutos
       
     if (error || !data?.signedUrl) {
-      console.error("[FLUX IA] Error creando URL firmada para", path, error);
+      devLog.error("[FLUX IA] Error creando URL firmada para", path, error);
       return null;
     }
     return data.signedUrl;
   } catch (e) {
-    console.error("[FLUX IA] Excepción en obtenerUrlFirmada:", e);
+    devLog.error("[FLUX IA] Excepción en obtenerUrlFirmada:", e);
     return null;
   }
 }
@@ -202,14 +206,14 @@ async function descargarComoBase64(path, mimeType) {
 
     const res = await fetch(url);
     if (!res.ok) {
-      console.error("[FLUX IA] Fetch falló para", path, res.status, res.statusText);
+      devLog.error("[FLUX IA] Fetch falló para", path, res.status, res.statusText);
       return null;
     }
     
     // Ignorar archivos mayores a 15 MB para evitar timeouts o bloqueos de la API
     const contentLength = res.headers.get("content-length");
     if (contentLength && parseInt(contentLength) > 15 * 1024 * 1024) {
-      console.warn("[FLUX IA] Archivo demasiado grande, omitiendo:", path);
+      devLog.warn("[FLUX IA] Archivo demasiado grande, omitiendo:", path);
       return null;
     }
     
@@ -222,10 +226,10 @@ async function descargarComoBase64(path, mimeType) {
       chunks.push(String.fromCharCode(...bytes.subarray(i, i + CHUNK)));
     }
     
-    console.log("[FLUX IA] Archivo descargado OK:", path, `(${(bytes.length / 1024).toFixed(1)} KB)`);
+    devLog.log("[FLUX IA] Archivo descargado OK:", path, `(${(bytes.length / 1024).toFixed(1)} KB)`);
     return { base64: btoa(chunks.join("")), mimeType };
   } catch (e) {
-    console.error("[FLUX IA] Error descargando archivo:", path, e);
+    devLog.error("[FLUX IA] Error descargando archivo:", path, e);
     return null;
   }
 }
@@ -257,7 +261,7 @@ async function llamarGeminiMultimodal(parts, { maxOutputTokens = 6000, temperatu
   const candidate = data.candidates?.[0];
 
   if (candidate?.finishReason === "MAX_TOKENS") {
-    console.warn("[FLUX IA] Resumen cortado por límite de tokens.");
+    devLog.warn("[FLUX IA] Resumen cortado por límite de tokens.");
   }
 
   // Gemini puede responder en múltiples partes: unir todo el texto
@@ -270,7 +274,7 @@ async function llamarGeminiMultimodal(parts, { maxOutputTokens = 6000, temperatu
     // Diagnóstico detallado para detectar bloqueos de seguridad de Google
     const razon = candidate?.finishReason || "sin candidatos";
     const bloqueo = data.promptFeedback?.blockReason || "";
-    console.error("[FLUX IA] Respuesta vacía. finishReason:", razon, "blockReason:", bloqueo, data);
+    devLog.error("[FLUX IA] Respuesta vacía. finishReason:", razon, "blockReason:", bloqueo, data);
     throw new Error(`La IA no pudo procesar los archivos (${razon || bloqueo || "respuesta vacía"}). Intenta de nuevo.`);
   }
 
@@ -444,7 +448,7 @@ ${totalArchivos === 0 ? "El repositorio está vacío: sugiere qué tipos de arch
   return llamarGeminiMultimodal(parts, { maxOutputTokens: 8000, temperature: 0.5 })
     .catch(errorMultimodal => {
       // Fallback: Si el procesamiento multimodal falla (ej. timeout), reintenta analizando solo los nombres/metadatos
-      console.warn("[FLUX IA] Llamada multimodal falló, reintentando sin archivos:", errorMultimodal.message);
+      devLog.warn("[FLUX IA] Llamada multimodal falló, reintentando sin archivos:", errorMultimodal.message);
       const promptFallback = promptTexto +
         "\n\n[NOTA INTERNA: Los archivos no pudieron procesarse en esta llamada. Analiza únicamente a partir de los nombres y tipos de archivo listados arriba.]";
       return llamarGemini(promptFallback, { maxOutputTokens: 6000, temperature: 0.6 });

@@ -89,8 +89,9 @@ function Registro() {
         }
 
         // 2. Validación de dominio de correo (Seguridad Institucional)
-        if (!email.endsWith('@correo.unimet.edu.ve')) {
-          throw new Error('Solo se permiten correos @correo.unimet.edu.ve')
+        const dominioPermitido = import.meta.env.VITE_ALLOWED_EMAIL_DOMAIN || 'correo.unimet.edu.ve';
+        if (!email.endsWith(`@${dominioPermitido}`)) {
+          throw new Error(`Solo se permiten correos @${dominioPermitido}`)
         }
 
         // 3. Validación de seguridad de contraseña
@@ -190,7 +191,7 @@ function Registro() {
             <input 
               className="input" 
               type="email" 
-              placeholder="usuario@correo.unimet.edu.ve"
+              placeholder={`usuario@${import.meta.env.VITE_ALLOWED_EMAIL_DOMAIN || 'correo.unimet.edu.ve'}`}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
