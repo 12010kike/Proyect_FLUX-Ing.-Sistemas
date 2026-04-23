@@ -10,18 +10,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../../config/supabaseClient";
-import logoFlux from "../../assets/logo-flux.png";
 import TaskMaster from "../Tareas/TaskMaster";
 import { PALETA_BANNERS, obtenerColorEntidad } from "../../utils/groupColors";
 
 // Endpoints / API Services
 import {
   actualizarVisibilidadGrupo,
-  actualizarNombreGrupo,
   actualizarColorGrupo,
-  abandonarGrupo,
   eliminarArchivoGrupo,
-  eliminarGrupo,
   expulsarMiembro,
   obtenerVistaPreviaPorCodigo,
   listarMensajesGrupo,
@@ -57,7 +53,6 @@ export default function GrupoDetalle() {
   const [error, setError] = useState("");
   
   // -- Stream y Ajustes de Grupo
-  const [nuevoNombreGrupo, setNuevoNombreGrupo] = useState("");
   const [nuevoAnuncio, setNuevoAnuncio] = useState("");
   const [guardandoVisibilidad, setGuardandoVisibilidad] = useState(false);
   const [guardandoColorGrupo, setGuardandoColorGrupo] = useState(false);
@@ -133,16 +128,6 @@ export default function GrupoDetalle() {
     () => Boolean(userId && grupo?.creadorId && userId === grupo.creadorId),
     [userId, grupo]
   );
-
-  const anuncios = useMemo(() => {
-    const items = grupo?.actividad || [];
-    return items
-      .filter(a => `${a.mensaje || ""}`.startsWith("ANUNCIO::"))
-      .map(a => ({
-        ...a,
-        texto: `${a.mensaje || ""}`.replace("ANUNCIO::", "")
-      }));
-  }, [grupo]);
 
   const streamItems = useMemo(() => {
     const items = grupo?.actividad || [];
@@ -529,7 +514,6 @@ export default function GrupoDetalle() {
     }
     
     setGrupo(g);
-    setNuevoNombreGrupo(g?.nombre || "");
     setColorGrupoSeleccionado(g?.color_id || PALETA_BANNERS[0].id);
     const miembro = g?.miembros?.find(m => m.user_id === userId);
     setEsAdmin(Boolean(miembro?.is_admin));
@@ -679,24 +663,6 @@ export default function GrupoDetalle() {
     await recargarGrupo();
   }
 
-  async function manejarGuardarNombre() {
-    if (!grupo || !nuevoNombreGrupo.trim()) return;
-    setError("");
-    try {
-      await actualizarNombreGrupo({
-        grupoId: grupo.id,
-        nombre: nuevoNombreGrupo,
-        actorId: userId,
-        actorNombre: displayName,
-        nombreAnterior: grupo.nombre
-      });
-      setGrupo(prev => ({ ...prev, nombre: nuevoNombreGrupo.trim() }));
-      await recargarGrupo();
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
   async function manejarCambiarVisibilidad(esPublico) {
     if (!grupo || !esAdmin) return;
     setError("");
@@ -739,26 +705,6 @@ export default function GrupoDetalle() {
     if (!grupo) return;
     await expulsarMiembro({ grupoId: grupo.id, miembroId });
     await recargarGrupo();
-  }
-
-  async function manejarEliminarGrupo() {
-    if (!grupo) return;
-    const ok = window.confirm("Eliminar este grupo? Esta acción no se puede deshacer.");
-    if (!ok) return;
-    await eliminarGrupo({ grupoId: grupo.id });
-    navigate("/grupos");
-  }
-
-  async function manejarAbandonarGrupo() {
-    if (!grupo) return;
-    let mensaje = "Abandonar este grupo? Si eres el último miembro, se eliminará.";
-    if (esAdmin && (grupo?.miembros?.length || 0) > 1) {
-      mensaje = "Eres administrador. Si sales, se asignará automáticamente otro miembro como administrador. ¿Continuar?";
-    }
-    const ok = window.confirm(mensaje);
-    if (!ok) return;
-    await abandonarGrupo({ grupoId: grupo.id });
-    navigate("/grupos");
   }
 
   // ─── 8. FUNCIONES DE PERFIL Y AVATARES ─────────────────────────────────

@@ -17,14 +17,10 @@ import {
   eliminarArchivoRepositorioPublico,
   actualizarColorRepositorioPublico,
   guardarCalificacionRepositorioPublico,
-  agregarColaboradorPorEmail,
-  eliminarColaboradorRepositorioPublico,
   listarArchivosRepositorioPublico,
   listarColaboradoresRepositorioPublico,
-  obtenerMiCalificacionRepositorioPublico,
   obtenerPromedioRepositorioPublico,
   obtenerRepositorioPublicoPorId,
-  salirRepositorioPublico,
   subirArchivoRepositorioPublico,
   toggleFavoritoRepositorio,
   isRepositorioFavorito
@@ -33,9 +29,7 @@ import { generarResumenRepositorio } from "../../servicios/ia.api";
 import { supabase } from "../../config/supabaseClient";
 import {
   PALETA_BANNERS,
-  guardarColorGuardado,
   obtenerColorEntidad,
-  obtenerColorGuardado
 } from "../../utils/groupColors";
 
 // Componentes de Interfaz
@@ -54,7 +48,6 @@ export default function RepositorioPublicoDetalle() {
   const [repo, setRepo] = useState(null);
   const [userId, setUserId] = useState(null);
   const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState("");
   const [tabActiva, setTabActiva] = useState("info");
   
   // -- Estados de Roles e Interacción
@@ -68,13 +61,10 @@ export default function RepositorioPublicoDetalle() {
   const [archivosSeleccionados, setArchivosSeleccionados] = useState([]);
   const [actividad, setActividad] = useState([]);
   const [colaboradores, setColaboradores] = useState([]);
-  const [emailColaborador, setEmailColaborador] = useState("");
   const [nuevoAnuncio, setNuevoAnuncio] = useState("");
   
   // -- Estados de UI y Mensajes
   const [subiendo, setSubiendo] = useState(false);
-  const [mensaje, setMensaje] = useState("");
-  const [mensajeColaboradores, setMensajeColaboradores] = useState("");
   const [mostrarConfirmEliminar, setMostrarConfirmEliminar] = useState(false);
   const [colorRepoSeleccionado, setColorRepoSeleccionado] = useState(PALETA_BANNERS[0].id);
   const inputRef = useRef(null);
@@ -82,7 +72,6 @@ export default function RepositorioPublicoDetalle() {
   // -- Estados de Calificación (Ratings)
   const [ratingPromedio, setRatingPromedio] = useState(0);
   const [ratingTotal, setRatingTotal] = useState(0);
-  const [miRating, setMiRating] = useState("");
   const [guardandoRating, setGuardandoRating] = useState(false);
 
   // -- Estados de Inteligencia Artificial
@@ -114,7 +103,6 @@ export default function RepositorioPublicoDetalle() {
   useEffect(() => {
     (async () => {
       setCargando(true);
-      setError("");
       try {
         const data = await obtenerRepositorioPublicoPorId(id);
         setRepo(data);
@@ -138,7 +126,7 @@ export default function RepositorioPublicoDetalle() {
           console.warn("Error checking favorite:", e.message);
         }
       } catch (e) {
-        setError(e.message);
+        console.error("Error al cargar repo:", e.message);
         setRepo(null);
       } finally {
         setCargando(false);
@@ -161,16 +149,11 @@ export default function RepositorioPublicoDetalle() {
     if (!repoId) {
       setRatingPromedio(0);
       setRatingTotal(0);
-      setMiRating("");
       return;
     }
-    const [promedio, miCalificacion] = await Promise.all([
-      obtenerPromedioRepositorioPublico({ repositorioId: repoId }),
-      obtenerMiCalificacionRepositorioPublico({ repositorioId: repoId })
-    ]);
+    const promedio = await obtenerPromedioRepositorioPublico({ repositorioId: repoId });
     setRatingPromedio(promedio?.ratingPromedio || 0);
     setRatingTotal(promedio?.ratingTotal || 0);
-    setMiRating(miCalificacion ? String(miCalificacion) : "");
   }
 
   async function cargarColaboradores(repoId, uid) {
@@ -247,7 +230,7 @@ export default function RepositorioPublicoDetalle() {
       file => tiposPermitidos.includes(file.type) && file.size <= 20 * 1024 * 1024
     );
     if (archivosArray.length && !archivosValidos.length) {
-      setMensaje("Solo se permiten archivos PDF, DOCX o PNG de hasta 20MB.");
+      alert("Solo se permiten archivos PDF, DOCX o PNG de hasta 20MB.");
     }
     setArchivosSeleccionados(archivosValidos);
   };
@@ -270,9 +253,9 @@ export default function RepositorioPublicoDetalle() {
       }
       setArchivosSeleccionados([]);
       await cargarArchivos(repo.id);
-      setMensaje("¡Subida completada!");
+      alert("¡Subida completada!");
     } catch (e) {
-      setMensaje(`Error: ${e.message}`);
+      alert(`Error: ${e.message}`);
     } finally {
       setSubiendo(false);
     }
@@ -288,23 +271,11 @@ export default function RepositorioPublicoDetalle() {
       });
       await cargarArchivos(repo.id);
     } catch (e) {
-      setMensaje(`Error: ${e.message}`);
+      alert(`Error: ${e.message}`);
     }
   }
 
   // --- Colaboradores e Invitaciones ---
-  async function manejarAgregarColaborador() {
-    const correo = emailColaborador.trim();
-    if (!repo?.id || !esCreador || !correo) return;
-    try {
-      await agregarColaboradorPorEmail({ repositorioId: repo.id, email: correo });
-      setEmailColaborador("");
-      await cargarColaboradores(repo.id, userId);
-    } catch (e) {
-      setMensajeColaboradores(`Error: ${e.message}`);
-    }
-  }
-
   async function manejarUnirsePorInvitacion() {
     if (!repo?.id) return;
     if (!userId) {
@@ -327,12 +298,12 @@ export default function RepositorioPublicoDetalle() {
 
       if (error && error.code !== '23505') throw error;
 
-      setMostrarPopUpUnirse(false); 
+      setMostrarPopUpUnirse(false);
       // Limpiamos la URL al terminar de unirse
-      window.history.replaceState(null, "", location.pathname); 
-      await cargarColaboradores(repo.id, userId); 
-      setTabActiva("archivos"); 
-      setMensajeColaboradores("¡Te has unido exitosamente!");
+      window.history.replaceState(null, "", location.pathname);
+      await cargarColaboradores(repo.id, userId);
+      setTabActiva("archivos");
+      alert("¡Te has unido exitosamente!");
 
     } catch (e) {
       alert(`Aviso: ${e.message}`);
@@ -354,13 +325,12 @@ export default function RepositorioPublicoDetalle() {
       setNuevoAnuncio("");
       await cargarActividad(repo.id);
     } catch (e) {
-      setMensaje(`Error: ${e.message}`);
+      alert(`Error: ${e.message}`);
     }
   }
 
   async function manejarCalificar(valorNota) {
     if (!repo?.id || !userId) return;
-    setMiRating(valorNota);
     setGuardandoRating(true);
     try {
       await guardarCalificacionRepositorioPublico({ repositorioId: repo.id, rating: Number(valorNota) });

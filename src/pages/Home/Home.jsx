@@ -11,7 +11,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../../config/supabaseClient";
-import logoFlux from "../../assets/logo-flux.png";
 import { PALETA_BANNERS, obtenerColorEntidad } from "../../utils/groupColors";
 
 // Endpoints / API Services
@@ -115,21 +114,6 @@ export default function Home() {
   const fechaFiltroLabel = FECHA_OPTIONS.find(o => o.value === filtroFechaRepos)?.label || "Sin filtro de fecha";
   const ratingFiltroLabel = RATING_OPTIONS.find(o => o.value === filtroRatingRepos)?.label || "Sin filtro de puntuación";
 
-  const resumenHorario = useMemo(() => {
-    if (!horario.length) return "Sin horario";
-    return horario
-      .slice()
-      .sort((a, b) =>
-        a.dayOfWeek === b.dayOfWeek
-          ? a.startTime.localeCompare(b.startTime)
-          : a.dayOfWeek - b.dayOfWeek
-      )
-      .map(b => {
-        const diaLabel = DIAS.find(d => d.value === b.dayOfWeek)?.label || "";
-        return `${diaLabel} ${b.startTime}-${b.endTime}`;
-      })
-      .join(", ");
-  }, [horario]);
 
   const horarioDrawer = useMemo(() => {
     return horario
@@ -417,7 +401,7 @@ export default function Home() {
           table: "repositorios_publicos",
           filter: `creador_id=eq.${userId}`
         },
-        payload => {
+        () => {
           cargarReposCreados();
         }
       )

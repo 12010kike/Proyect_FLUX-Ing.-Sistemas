@@ -73,7 +73,7 @@ export default function ResetPassword() {
         try {
           const cleanUrl = window.location.pathname + window.location.search
           window.history.replaceState({}, document.title, cleanUrl)
-        } catch (e) {
+        } catch {
           // Si falla la limpieza no es crítico, ignorar
         }
       }
